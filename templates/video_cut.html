@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container">
+    <div class="card p-4 shadow-sm">
+        <h4><i class="bi bi-scissors"></i> Process Video Clip</h4>
+        <form id="cutForm" enctype="multipart/form-data">
+            <div class="mb-3">
+                <label class="form-label">YouTube link (optional):</label>
+                <input type="text" name="url" class="form-control" placeholder="https://www.youtube.com/watch?v=...">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Or upload file:</label>
+                <input type="file" name="file" class="form-control" accept="video/*">
+            </div>
+            <div class="row mb-3">
+                <div class="col">
+                    <label class="form-label">Start (sec or hh:mm:ss):</label>
+                    <input type="text" name="start_time" class="form-control" placeholder="ex: 01:20 or 80" value="0">
+                </div>
+                <div class="col">
+                    <label class="form-label">End (sec or hh:mm:ss):</label>
+                    <input type="text" name="end_time" class="form-control" placeholder="ex: 02:45 or 165">
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary w-100">Start Processing</button>
+        </form>
+    </div>
+
+    <div id="status-container" class="mt-4"></div>
+</div>
+
+<script>
+    document.getElementById('cutForm').onsubmit = async (e) => {
+        e.preventDefault();
+        const jobId = "J" + Math.floor(Math.random() * 100000);
+        const formData = new FormData(e.target);
+        formData.append('job_id', jobId);
+
+        const cardHtml = `
+            <div id="card-${jobId}" class="alert alert-secondary border mb-3">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <strong>Job #${jobId}</strong>: <span id="status-${jobId}">Initializing...</span>
+                        <div id="spinner-${jobId}" class="spinner-border spinner-border-sm text-primary"></div>
+                    </div>
+                </div>
+                <div id="links-${jobId}" class="mt-2"></div>
+                <pre id="log-${jobId}" class="small bg-light p-2 mt-2" style="height:100px; overflow:auto;"></pre>
+            </div>
+        `;
+        document.getElementById('status-container').insertAdjacentHTML('afterbegin', cardHtml);
+
+        await fetch('/video-cut', { method: 'POST', body: formData });
+
+        const interval = setInterval(async () => {
+            const response = await fetch('/check-job/' + jobId);
+            const data = await response.json();
+
+            if (data.status === 'running' || data.status === 'starting' || data.status === 'downloading' || data.status === 'cutting' || data.status === 'unsilencing' || data.status === 'cropping' || data.status === 'subtitling') {
+                document.getElementById('status-' + jobId).innerText = data.status;
+            } 
+            else if (data.status === 'completed') {
+                clearInterval(interval);
+                document.getElementById('status-' + jobId).innerText = "Completed!";
+                document.getElementById('card-' + jobId).className = "alert alert-success border mb-3";
+                document.getElementById('spinner-' + jobId).remove();
+                let links = `<a href='/download/${data.video}' class='btn btn-success btn-sm w-100 mb-1'>Download video</a>`;
+                if (data.srt) {
+                    links += `<a href='/download/${data.srt}' class='btn btn-secondary btn-sm w-100 mb-1'>Download subtitles</a>`;
+                    links += `<a href='/editor/${jobId}' class='btn btn-primary btn-sm w-100'>Edit</a>`;
+                }
+                document.getElementById('links-' + jobId).innerHTML = links;
+            } 
+            else if (data.status === 'error') {
+                clearInterval(interval);
+                document.getElementById('status-' + jobId).innerText = "Error: " + data.msg;
+                document.getElementById('card-' + jobId).className = "alert alert-danger border mb-3";
+                document.getElementById('spinner-' + jobId).remove();
+            }
+
+            // append log lines if any
+            if (data.log) {
+                const logEl = document.getElementById('log-' + jobId);
+                logEl.textContent = data.log.join("\n");
+                logEl.scrollTop = logEl.scrollHeight;
+            }
+        }, 3000);
+    };
+</script>
+{% endblock %}
