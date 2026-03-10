@@ -12,6 +12,10 @@
                 <label class="form-label">Or upload file:</label>
                 <input type="file" name="file" class="form-control" accept="video/*">
             </div>
+            <div class="mb-3 form-check">
+                <input type="checkbox" name="skip_unsilence" class="form-check-input" id="skipUnsilence">
+                <label class="form-check-label" for="skipUnsilence">Skip unsilence step (already quiet audio)</label>
+            </div>
             <div class="row mb-3">
                 <div class="col">
                     <label class="form-label">Start (sec or hh:mm:ss):</label>
@@ -35,6 +39,7 @@
         const jobId = "J" + Math.floor(Math.random() * 100000);
         const formData = new FormData(e.target);
         formData.append('job_id', jobId);
+        // include checkbox value (FormData handles it automatically if checked)
 
         const cardHtml = `
             <div id="card-${jobId}" class="alert alert-secondary border mb-3">

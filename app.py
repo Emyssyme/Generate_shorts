@@ -33,11 +33,59 @@ DOWNLOADS_DIR = os.path.join(BASE_DIR, "downloads")
 if not os.path.exists(DOWNLOADS_DIR):
     os.makedirs(DOWNLOADS_DIR)
 
+# fonts directory (optional).  Users can drop .ttf/.otf files here and the
+# editor will expose them by basename.
+FONTS_DIR = os.path.join(BASE_DIR, 'fonts')
+if not os.path.exists(FONTS_DIR):
+    os.makedirs(FONTS_DIR)
+
+# build font map from folder, fall back to Windows system fonts
+FONT_MAP = {}
+for fname in os.listdir(FONTS_DIR):
+    if fname.lower().endswith(('.ttf', '.otf')):
+        name = os.path.splitext(fname)[0]
+        FONT_MAP[name] = os.path.join(FONTS_DIR, fname)
+
+# default system fonts if folder is empty or missing entries
+if not FONT_MAP:
+    if sys.platform.startswith('win'):
+        FONT_MAP = {
+            'Arial':           'C:/Windows/Fonts/arial.ttf',
+            'Arial Bold':      'C:/Windows/Fonts/arialbd.ttf',
+            'Impact':          'C:/Windows/Fonts/impact.ttf',
+            'Georgia':         'C:/Windows/Fonts/georgia.ttf',
+            'Verdana':         'C:/Windows/Fonts/verdana.ttf',
+            'Courier New':     'C:/Windows/Fonts/cour.ttf',
+            'Times New Roman': 'C:/Windows/Fonts/times.ttf',
+            'Trebuchet MS':    'C:/Windows/Fonts/trebuc.ttf',
+            'Calibri':         'C:/Windows/Fonts/calibri.ttf',
+            'Segoe UI':        'C:/Windows/Fonts/segoeui.ttf',
+            'Comic Sans MS':   'C:/Windows/Fonts/comic.ttf',
+        }
+    else:
+        # common Linux fonts
+        FONT_MAP = {
+            'DejaVu Sans':      '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+            'DejaVu Sans Bold': '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+            'Liberation Sans':  '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+            'Liberation Sans Bold': '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf',
+            'FreeSerif':        '/usr/share/fonts/truetype/freefont/FreeSerif.ttf',
+            'FreeSans':         '/usr/share/fonts/truetype/freefont/FreeSans.ttf',
+        }
+
 # simple sqlite cache to avoid reprocessing identical url/time ranges
 CACHE_DB = os.path.join(BASE_DIR, "cache.db")
 def init_cache():
     conn = sqlite3.connect(CACHE_DB)
     c = conn.cursor()
+    # old versions may lack skip_unsilence column -- add if necessary
+    c.execute("PRAGMA table_info(cache)")
+    columns = [row[1] for row in c.fetchall()]
+    if 'skip_unsilence' not in columns:
+        try:
+            c.execute('ALTER TABLE cache ADD COLUMN skip_unsilence INTEGER DEFAULT 0')
+        except Exception:
+            pass
     c.execute('''
         CREATE TABLE IF NOT EXISTS cache (
             url TEXT,
@@ -45,32 +93,33 @@ def init_cache():
             end TEXT,
             video TEXT,
             srt TEXT,
-            UNIQUE(url, start, end)
+            skip_unsilence INTEGER DEFAULT 0,
+            UNIQUE(url, start, end, skip_unsilence)
         )
     ''')
     conn.commit()
     conn.close()
 
-def find_cache(url, start, end):
+def find_cache(url, start, end, skip_unsilence=False):
     conn = sqlite3.connect(CACHE_DB)
     c = conn.cursor()
-    c.execute('SELECT video, srt FROM cache WHERE url=? AND start=? AND end=?',
-              (url or '', start or '', end or ''))
+    c.execute('SELECT video, srt FROM cache WHERE url=? AND start=? AND end=? AND skip_unsilence=?',
+              (url or '', start or '', end or '', int(skip_unsilence)))
     row = c.fetchone()
     conn.close()
     return row  # either None or (video, srt)
 
-def store_cache(url, start, end, video, srt):
+def store_cache(url, start, end, video, srt, skip_unsilence=False):
     conn = sqlite3.connect(CACHE_DB)
     c = conn.cursor()
     try:
         if video is None or srt is None:
-            # remove stale entry
-            c.execute('DELETE FROM cache WHERE url=? AND start=? AND end=?',
-                      (url or '', start or '', end or ''))
+            # remove stale entry for this configuration
+            c.execute('DELETE FROM cache WHERE url=? AND start=? AND end=? AND skip_unsilence=?',
+                      (url or '', start or '', end or '', int(skip_unsilence)))
         else:
-            c.execute('INSERT OR REPLACE INTO cache (url, start, end, video, srt) VALUES (?,?,?,?,?)',
-                      (url or '', start or '', end or '', video, srt))
+            c.execute('INSERT OR REPLACE INTO cache (url, start, end, video, srt, skip_unsilence) VALUES (?,?,?,?,?,?)',
+                      (url or '', start or '', end or '', video, srt, int(skip_unsilence)))
         conn.commit()
     finally:
         conn.close()
@@ -253,7 +302,7 @@ def run_unsilence(input_video, output_video, job_id=None):
     If ``job_id`` is provided the output from the helper script will be
     appended to the job's log so the web UI can display live progress.
     """
-    script = find_script("_unsilece_files_from_folder.py")
+    script = find_script("_unsilence_files.py")
     cmd = [sys.executable, script, input_video, output_video]
     if job_id:
         update_job(job_id, log="starting unsilence script")
@@ -278,7 +327,7 @@ def run_crop(input_video, output_dir, overlay=None):
     After the helper finishes we transcode the result to h264 so the HTML5
     <video> element can play it reliably.
     """
-    script = find_script("_crop_face_vertical_v5_folder.py")
+    script = find_script("_crop_face_vertical.py")
     cmd = [sys.executable, script, "--input", input_video, "--output", output_dir]
     if overlay:
         cmd.extend(["--overlay", overlay])
@@ -308,7 +357,7 @@ def run_subtitles(input_video, output_dir, model="large", max_length=22, job_id=
 
     If ``job_id`` is passed, stream the helper script's output into the job log.
     """
-    script = find_script("_Generate_subtitles_from_video_folder.py")
+    script = find_script("_generate_subtitles.py")
     cmd = [sys.executable, script, "--input", input_video, "--output", output_dir,
            "--model", model, "--max-length", str(max_length)]
     if job_id:
@@ -328,8 +377,13 @@ def run_subtitles(input_video, output_dir, model="large", max_length=22, job_id=
     return os.path.join(output_dir, base + ".srt")
 
 
-def background_pipeline(job_id, url=None, upload_path=None, start_time="0", end_time=None):
-    """Background thread that cuts/downloads then unsilences, crops, subtitles."""
+def background_pipeline(job_id, url=None, upload_path=None, start_time="0", end_time=None, skip_unsilence=False):
+    """Background thread that cuts/downloads then optionally unsilences, crops, subtitles.
+
+    ``skip_unsilence`` is used when the user knows the clip already has clean audio.
+    This is recorded in the cache so repeated calls with the same parameters will
+    behave identically.
+    """
     update_job(job_id, status="starting", log="job created")
     try:
         # determine source for cutting
@@ -365,9 +419,13 @@ def background_pipeline(job_id, url=None, upload_path=None, start_time="0", end_
             ff += ["-c", "copy", cut_path]
             subprocess.run(ff, check=True)
 
-        update_job(job_id, status="unsilencing", log="calling unsilence script")
-        unsilenced = os.path.join(DOWNLOADS_DIR, f"job_{job_id}_unsilenced.mp4")
-        run_unsilence(cut_path, unsilenced, job_id=job_id)
+        if skip_unsilence:
+            update_job(job_id, status="skipping unsilence", log="user requested no audio cleaning")
+            unsilenced = cut_path
+        else:
+            update_job(job_id, status="unsilencing", log="calling unsilence script")
+            unsilenced = os.path.join(DOWNLOADS_DIR, f"job_{job_id}_unsilenced.mp4")
+            run_unsilence(cut_path, unsilenced, job_id=job_id)
 
         update_job(job_id, status="cropping", log="running crop script")
         cropped = run_crop(unsilenced, DOWNLOADS_DIR)
@@ -386,7 +444,8 @@ def background_pipeline(job_id, url=None, upload_path=None, start_time="0", end_
         # cache this result for future identical requests
         if url:
             store_cache(url, start_time, end_time,
-                        os.path.basename(cropped), os.path.basename(srtfile))
+                        os.path.basename(cropped), os.path.basename(srtfile),
+                        skip_unsilence=skip_unsilence)
     except Exception as e:
         update_job(job_id, status="error", msg=str(e))
 
@@ -398,6 +457,7 @@ def video_cut():
         url = request.form.get('url', '').strip()
         start_time = request.form.get('start_time') or "0"
         end_time = request.form.get('end_time')
+        skip_unsilence = request.form.get('skip_unsilence') == 'on'
         job_id = request.form.get('job_id') or f"J{int(datetime.datetime.now().timestamp())}"
 
         upload_path = None
@@ -413,7 +473,7 @@ def video_cut():
 
         # if this is a URL request, check cache first
         if url and not upload_path:
-            cached = find_cache(url, start_time, end_time)
+            cached = find_cache(url, start_time, end_time, skip_unsilence=skip_unsilence)
             if cached:
                 video_name, srt_name = cached
                 video_path = os.path.join(DOWNLOADS_DIR, video_name)
@@ -426,7 +486,7 @@ def video_cut():
                     return {"status": "completed", "job_id": job_id}, 200
                 else:
                     # cache is stale; remove entry entirely
-                    store_cache(url, start_time, end_time, None, None)
+                    store_cache(url, start_time, end_time, None, None, skip_unsilence=skip_unsilence)
 
         # start background work
         thread = threading.Thread(target=background_pipeline,
@@ -435,7 +495,8 @@ def video_cut():
                                       'url': url if url else None,
                                       'upload_path': upload_path,
                                       'start_time': start_time,
-                                      'end_time': end_time
+                                      'end_time': end_time,
+                                      'skip_unsilence': skip_unsilence,
                                   })
         thread.start()
         return {"status": "accepted", "job_id": job_id}, 202

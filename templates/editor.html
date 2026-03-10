@@ -62,7 +62,7 @@
 
   <!-- ══════════ RIGHT: tabbed controls ══════════ -->
   <div class="col-xl-7 col-lg-6">
-    <form method="post" enctype="multipart/form-data" id="editForm">
+    <form method="post" enctype="multipart/form-data" id="editForm" novalidate>
       <!-- Hidden position fields kept in sync by drag JS -->
       <input type="hidden" name="overlay_x" id="overlayX" value="{{ job.overlay_x or 10 }}">
       <input type="hidden" name="overlay_y" id="overlayY" value="{{ job.overlay_y or 10 }}">
