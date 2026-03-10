@@ -33,6 +33,7 @@ The app will redirect to the login page, then the video cut interface.
 
 - The app uses `yt-dlp`, `ffmpeg` and several helper scripts found in the same directory (or parent directory).
 - Downloads and job state are stored in a `downloads` directory located in the same folder as `app.py` regardless of the current working directory.  (Older runs may have created a `downloads` elsewhere; you can move those files into the project folder if you want to keep them.)
+- A lightweight SQLite cache remembers previous YouTube URL + start/end combinations and will instantly return cached outputs instead of re‑downloading/processing the same segment again.  The cache file `cache.db` is created next to `app.py`.  When a lookup occurs the app checks that both the cached video and subtitle files still exist; if either has been deleted the cache entry is cleared and normal processing resumes.
 - A small log pane in the UI shows progress messages; you can monitor status updates as each step completes.  (The subtitle helper and unsilence script now stream their console output here.)
 - You can choose the X/Y offset when applying an overlay image from the editor screen.
 - Input validation has been added: you must supply either a YouTube URL or upload a file, and start/end times are respected.

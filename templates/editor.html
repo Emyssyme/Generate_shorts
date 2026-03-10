@@ -1,31 +1,560 @@
 {% extends "base.html" %}
 {% block content %}
-<h3>Editing job {{ job_key }}</h3>
-<div class="mb-3">
-    <video width="640" controls>
-        <source src="/download/{{ job.video }}" type="video/mp4">
-        Your browser does not support the video tag.
-    </video>
+<style>
+  /* height:auto keeps the correct aspect ratio when width:100% shrinks the canvas */
+  #previewCanvas { display:block; width:100%; height:auto; background:#111; border-radius:4px; cursor:crosshair; }
+  .tab-content.bordered { border:1px solid #dee2e6; border-top:none; border-radius:0 0 .375rem .375rem; }
+  .form-control-color { height:38px; padding:2px 4px; }
+  .size-row { display:flex; align-items:center; gap:8px; }
+  .size-row input[type=range] { flex:1; }
+  .size-row input[type=number] { width:72px; }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">Video Editor &mdash; <code>{{ job_key }}</code></h4>
+  <div>
+    <a href="/download/{{ job.video }}" class="btn btn-sm btn-success me-1">
+      <i class="bi bi-download"></i> Download
+    </a>
+    <a href="{{ url_for('video_cut') }}" class="btn btn-sm btn-outline-secondary">
+      <i class="bi bi-arrow-left"></i> Back
+    </a>
+  </div>
 </div>
-<form method="post" enctype="multipart/form-data">
-    <div class="mb-3">
-        <label class="form-label">Subtitles (SRT)</label>
-        <textarea name="srt_text" class="form-control" rows="10">{{ srt_content }}</textarea>
+
+<div class="row g-3">
+
+  <!-- ══════════ LEFT: canvas preview + video player ══════════ -->
+  <div class="col-xl-5 col-lg-6">
+    <div class="card mb-2">
+      <div class="card-header py-2 d-flex justify-content-between align-items-center">
+        <span class="fw-semibold"><i class="bi bi-play-btn"></i> Live Preview</span>
+        <small class="text-muted">Drag overlay / title to reposition. Coordinates are recorded at the video's native resolution and will be scaled for the final render.</small>
+      </div>
+      <div class="card-body p-0">
+        <canvas id="previewCanvas"></canvas>
+      </div>
     </div>
-    <div class="mb-3">
-        <label class="form-label">Overlay image (transparent PNG)</label>
-        <input type="file" name="overlay" class="form-control" accept="image/*">
+    <video id="sourceVideo" controls preload="auto" style="width:100%; border-radius:4px;">
+      <source src="/preview/{{ job.base_video or job.video }}" type="video/mp4">
+    </video>
+    {% if job.video != (job.base_video or job.video) %}
+    <div class="mt-2">
+      <p class="text-muted small mb-1">Last rendered output:</p>
+      <video controls style="width:100%; border-radius:4px;">
+        <source src="/download/{{ job.video }}" type="video/mp4">
+      </video>
     </div>
-    <div class="row mb-3">
-        <div class="col">
-            <label class="form-label">Overlay X offset</label>
-            <input type="text" name="overlay_x" class="form-control" value="10">
+    {% endif %}
+  </div>
+
+  <!-- ══════════ RIGHT: tabbed controls ══════════ -->
+  <div class="col-xl-7 col-lg-6">
+    <form method="post" enctype="multipart/form-data" id="editForm">
+      <!-- Hidden position fields kept in sync by drag JS -->
+      <input type="hidden" name="overlay_x" id="overlayX" value="{{ job.overlay_x or 10 }}">
+      <input type="hidden" name="overlay_y" id="overlayY" value="{{ job.overlay_y or 10 }}">
+      <input type="hidden" name="title_x"   id="titleX"   value="{{ job.title_x or 10 }}">
+      <input type="hidden" name="title_y"   id="titleY"   value="{{ job.title_y or 80 }}">
+      <input type="hidden" name="sub_y"     id="subY"     value="{{ job.sub_y or 30 }}">
+      <!-- preview dimensions used for coordinate scaling on the server -->
+      <input type="hidden" name="preview_w" id="previewW" value="{{ job.preview_w or 0 }}">
+      <input type="hidden" name="preview_h" id="previewH" value="{{ job.preview_h or 0 }}">
+
+      <ul class="nav nav-tabs" id="editorTabs" role="tablist">
+        <li class="nav-item">
+          <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-overlay" type="button">
+            <i class="bi bi-image"></i> Overlay
+          </button>
+        </li>
+        <li class="nav-item">
+          <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-title" type="button">
+            <i class="bi bi-fonts"></i> Title / Text
+          </button>
+        </li>
+        <li class="nav-item">
+          <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-subs" type="button">
+            <i class="bi bi-card-text"></i> Subtitles
+          </button>
+        </li>
+      </ul>
+
+      <div class="tab-content bordered p-3 mb-3">
+
+        <!-- ─── OVERLAY TAB ─── -->
+        <div class="tab-pane fade show active" id="tab-overlay">
+          <div class="mb-3">
+            <label class="form-label">Image file <span class="text-muted">(PNG with transparency recommended)</span></label>
+            <input type="file" name="overlay" class="form-control" accept="image/*" id="overlayInput">
+          </div>
+          {% if job.overlay %}
+          <div class="mb-2 d-flex align-items-center gap-2">
+            <img id="overlayThumb" src="/download/{{ job.overlay }}"
+                 style="max-height:56px; border:1px solid #ddd; border-radius:4px;">
+            <small class="text-muted">{{ job.overlay }}</small>
+          </div>
+          {% else %}
+          <img id="overlayThumb" style="display:none; max-height:56px; margin-bottom:8px; border:1px solid #ddd; border-radius:4px;">
+          {% endif %}
+          <div class="row g-2 mb-1">
+            <div class="col-5">
+              <label class="form-label">Width (px)</label>
+              <input type="number" name="overlay_w" id="overlayW" class="form-control"
+                     value="{{ job.overlay_w or '' }}" placeholder="auto" min="10" max="3840">
+            </div>
+            <div class="col-5">
+              <label class="form-label">Height (px)</label>
+              <input type="number" name="overlay_h" id="overlayH" class="form-control"
+                     value="{{ job.overlay_h or '' }}" placeholder="auto" min="10" max="3840">
+            </div>
+            <div class="col-2 d-flex align-items-end pb-1">
+              <div class="form-check">
+                <input type="checkbox" class="form-check-input" id="lockAspect" checked>
+                <label class="form-check-label small" for="lockAspect">Lock</label>
+              </div>
+            </div>
+          </div>
+          <small class="text-muted d-block mt-1">
+            <i class="bi bi-info-circle"></i> Drag the image on the preview canvas to reposition.
+          </small>
         </div>
-        <div class="col">
-            <label class="form-label">Overlay Y offset</label>
-            <input type="text" name="overlay_y" class="form-control" value="10">
+
+        <!-- ─── TITLE / TEXT TAB ─── -->
+        <div class="tab-pane fade" id="tab-title">
+          <div class="mb-3">
+            <label class="form-label">Title text</label>
+            <input type="text" name="title_text" id="titleText" class="form-control"
+                   value="{{ job.title_text or '' }}" placeholder="Enter title or leave blank to skip">
+          </div>
+          <div class="row g-2 mb-2">
+            <div class="col-6">
+              <label class="form-label">Font</label>
+              <select name="title_font" id="titleFont" class="form-select">
+                {% for font in font_list %}
+                <option value="{{ font }}" {% if job.title_font == font %}selected{% endif %}>{{ font }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-6">
+              <label class="form-label">Size (px)</label>
+              <div class="size-row">
+                <input type="range" id="titleSizeRange" min="8" max="200" value="{{ job.title_size or 48 }}">
+                <input type="number" name="title_size" id="titleSize" class="form-control"
+                       value="{{ job.title_size or 48 }}" min="8" max="200">
+              </div>
+            </div>
+          </div>
+          <div class="row g-2">
+            <div class="col-6">
+              <label class="form-label">Text colour</label>
+              <input type="color" name="title_color" id="titleColor"
+                     class="form-control form-control-color w-100"
+                     value="{{ job.title_color or '#ffffff' }}">
+            </div>
+            <div class="col-6">
+              <label class="form-label">Outline colour</label>
+              <input type="color" name="title_stroke_color" id="titleStrokeColor"
+                     class="form-control form-control-color w-100"
+                     value="{{ job.title_stroke_color or '#000000' }}">
+            </div>
+          </div>
+          <small class="text-muted d-block mt-2">
+            <i class="bi bi-info-circle"></i> Drag the title on the preview canvas to set its position.
+          </small>
         </div>
-    </div>
-    <button type="submit" class="btn btn-primary">Save changes</button>
-</form>
+
+        <!-- ─── SUBTITLES TAB ─── -->
+        <div class="tab-pane fade" id="tab-subs">
+          <div class="row g-2 mb-2">
+            <div class="col-5">
+              <label class="form-label">Font</label>
+              <select name="sub_font" id="subFont" class="form-select">
+                {% for font in font_list %}
+                <option value="{{ font }}" {% if job.sub_font == font %}selected{% endif %}>{{ font }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-4">
+              <label class="form-label">Size (px)</label>
+              <div class="size-row">
+                <input type="range" id="subSizeRange" min="8" max="100" value="{{ job.sub_size or 18 }}">
+                <input type="number" name="sub_size" id="subSize" class="form-control"
+                       value="{{ job.sub_size or 18 }}" min="8" max="100">
+              </div>
+            </div>
+            <div class="col-3">
+              <label class="form-label">Colour</label>
+              <input type="color" name="sub_color" id="subColor"
+                     class="form-control form-control-color w-100"
+                     value="{{ job.sub_color or '#ffffff' }}">
+            </div>
+          </div>
+          <div class="row g-2 mb-2">
+            <div class="col-6">
+              <label class="form-label">Outline colour</label>
+              <input type="color" name="sub_stroke_color" id="subStrokeColor"
+                     class="form-control form-control-color w-100"
+                     value="{{ job.sub_stroke_color or '#000000' }}">
+            </div>
+            <div class="col-6">
+              <label class="form-label">Position (px from bottom)</label>
+              <div class="size-row">
+                <input type="range" id="subYRange" min="0" max="500" value="{{ job.sub_y or 30 }}">
+                <input type="number" id="subYNum" class="form-control"
+                       value="{{ job.sub_y or 30 }}" min="0" max="500">
+              </div>
+            </div>
+          </div>
+          <small class="text-muted d-block mb-2">
+            <i class="bi bi-info-circle"></i> Drag the subtitle line on the preview canvas to reposition.
+          </small>
+          <div class="mb-1">
+            <label class="form-label">SRT content <small class="text-muted">(edit directly)</small></label>
+            <textarea id="srtTextarea" name="srt_text" class="form-control font-monospace"
+                      rows="11" style="font-size:0.78rem;">{{ srt_content }}</textarea>
+          </div>
+        </div>
+
+      </div><!-- /tab-content -->
+
+      <div class="d-flex gap-2">
+        <button type="submit" class="btn btn-primary" id="renderBtn">
+          <i class="bi bi-film"></i> Render Video
+        </button>
+        <a href="/download/{{ job.video }}" class="btn btn-outline-success">
+          <i class="bi bi-download"></i> Download
+        </a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+console.log('editor script loaded');
+// attach submit handler so user gets immediate feedback when render is clicked
+const editForm = document.getElementById('editForm');
+if (editForm) {
+  editForm.addEventListener('submit', e => {
+    console.log('form submitting');
+    const btn = document.getElementById('renderBtn');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML =
+        '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Rendering...';
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════
+//  SRT parser
+// ═══════════════════════════════════════════════
+function parseSRT(text) {
+  const entries = [];
+  for (const block of text.trim().split(/\n\s*\n/)) {
+    const lines = block.trim().split('\n');
+    if (lines.length < 3) continue;
+    const m = lines[1].match(/(\d{2}:\d{2}:\d{2}[,.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,.]\d{3})/);
+    if (!m) continue;
+    entries.push({
+      start: toSec(m[1]),
+      end:   toSec(m[2]),
+      text:  lines.slice(2).join('\n').replace(/<[^>]+>/g, '')
+    });
+  }
+  return entries;
+}
+function toSec(t) {
+  const [h, mn, s] = t.replace(',', '.').split(':');
+  return +h * 3600 + +mn * 60 + +s;
+}
+
+// ═══════════════════════════════════════════════
+//  Canvas live preview
+// ═══════════════════════════════════════════════
+const video  = document.getElementById('sourceVideo');
+const canvas = document.getElementById('previewCanvas');
+const ctx    = canvas.getContext('2d');
+
+let overlayImg    = null;
+let overlayAspect = null;  // naturalW/naturalH, set when image loads
+let overlayPos    = { x: {{ job.overlay_x | default(10) | int }},
+                      y: {{ job.overlay_y | default(10) | int }} };
+let titlePos      = { x: {{ job.title_x   | default(10) | int }},
+                      y: {{ job.title_y   | default(80) | int }} };
+let subPos        = { y: {{ job.sub_y     | default(30) | int }} };  // px from bottom
+let srtEntries    = [];
+let dragging      = null;  // 'overlay' | 'title' | 'sub'
+let dragStart     = {};
+let canvasReady   = false; // true once first frame data is available
+
+// helper: read overlay W/H with natural-size fallback when fields are empty
+function getOvWH() {
+  const wVal = parseInt(document.getElementById('overlayW').value);
+  const hVal = parseInt(document.getElementById('overlayH').value);
+  const w = (wVal > 0) ? wVal : (overlayImg ? overlayImg.naturalWidth  : 150);
+  const h = (hVal > 0) ? hVal : (overlayImg ? overlayImg.naturalHeight : 150);
+  return { w, h };
+}
+
+// pre-load existing overlay on page load
+{% if job.overlay %}
+(function () {
+  const img = new Image();
+  img.onload = () => {
+    overlayImg    = img;
+    overlayAspect = img.naturalWidth / img.naturalHeight;
+    const wIn = document.getElementById('overlayW');
+    const hIn = document.getElementById('overlayH');
+    if (!wIn.value) wIn.value = img.naturalWidth;
+    if (!hIn.value) hIn.value = img.naturalHeight;
+  };
+  img.src = '/preview/{{ job.overlay }}';
+}());
+{% endif %}
+
+// loadedmetadata → dimensions known (readyState 1) — resize canvas
+video.addEventListener('loadedmetadata', () => {
+  canvas.width  = video.videoWidth  || 540;
+  canvas.height = video.videoHeight || 960;
+  // update hidden fields so server knows the preview dimensions
+  document.getElementById('previewW').value = video.videoWidth;
+  document.getElementById('previewH').value = video.videoHeight;
+});
+// loadeddata → first frame decoded (readyState >= 2) — safe to drawImage
+video.addEventListener('loadeddata', () => {
+  canvas.width  = video.videoWidth  || canvas.width;
+  canvas.height = video.videoHeight || canvas.height;
+  canvasReady   = true;
+});
+// Also mark ready when the browser can start playing
+video.addEventListener('canplay', () => { canvasReady = true; });
+
+function getConf() {
+  const { w: ovW, h: ovH } = getOvWH();
+  return {
+    titleText:   document.getElementById('titleText').value,
+    titleFont:   document.getElementById('titleFont').value,
+    titleSize:   parseInt(document.getElementById('titleSize').value)   || 48,
+    titleColor:  document.getElementById('titleColor').value,
+    titleStroke: document.getElementById('titleStrokeColor').value,
+    subFont:     document.getElementById('subFont').value,
+    subSize:     parseInt(document.getElementById('subSize').value)     || 18,
+    subColor:    document.getElementById('subColor').value,
+    subStroke:   document.getElementById('subStrokeColor').value,
+    ovW, ovH,
+  };
+}
+
+function drawFrame() {
+  if (!canvasReady) { requestAnimationFrame(drawFrame); return; }
+  const c = getConf();
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // ── video frame ────────────────────────────────────────────────────
+  if (video.readyState >= 2) {
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  } else {
+    ctx.fillStyle = '#111';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
+  // ── overlay image ────────────────────────────────────────────────────
+  if (overlayImg) {
+    ctx.drawImage(overlayImg, overlayPos.x, overlayPos.y, c.ovW, c.ovH);
+    // dashed selection box
+    ctx.save();
+    ctx.strokeStyle = 'rgba(0,140,255,0.9)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 3]);
+    ctx.strokeRect(overlayPos.x, overlayPos.y, c.ovW, c.ovH);
+    ctx.restore();
+  }
+
+  // ── title text ───────────────────────────────────────────────────────
+  if (c.titleText) {
+    ctx.save();
+    ctx.font      = `bold ${c.titleSize}px "${c.titleFont}", sans-serif`;
+    ctx.lineWidth = Math.max(1, c.titleSize / 14);
+    ctx.strokeStyle = c.titleStroke;
+    ctx.strokeText(c.titleText, titlePos.x, titlePos.y);
+    ctx.fillStyle = c.titleColor;
+    ctx.fillText(c.titleText, titlePos.x, titlePos.y);
+    ctx.restore();
+  }
+
+  // ── subtitle guide line (always visible so user can drag it) ─────────
+  const subBaseline = canvas.height - subPos.y;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,220,0,0.5)';
+  ctx.lineWidth   = 1;
+  ctx.setLineDash([5, 5]);
+  ctx.beginPath();
+  ctx.moveTo(0, subBaseline);
+  ctx.lineTo(canvas.width, subBaseline);
+  ctx.stroke();
+  ctx.restore();
+
+  // ── current subtitle ─────────────────────────────────────────────────
+  const t   = video.currentTime;
+  const sub = srtEntries.find(e => t >= e.start && t <= e.end);
+  if (sub) {
+    const lines = sub.text.split('\n');
+    const lh    = c.subSize * 1.4;
+    ctx.save();
+    ctx.font      = `bold ${c.subSize}px "${c.subFont}", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.lineWidth = Math.max(1, c.subSize / 10);
+    const cx = canvas.width / 2;
+    lines.forEach((line, i) => {
+      const y = subBaseline - (lines.length - 1 - i) * lh;
+      ctx.strokeStyle = c.subStroke;
+      ctx.strokeText(line, cx, y);
+      ctx.fillStyle = c.subColor;
+      ctx.fillText(line, cx, y);
+    });
+    ctx.restore();
+  }
+
+  requestAnimationFrame(drawFrame);
+}
+
+// start render loop
+document.getElementById('srtTextarea').addEventListener('input', () => {
+  srtEntries = parseSRT(document.getElementById('srtTextarea').value);
+});
+srtEntries = parseSRT(document.getElementById('srtTextarea').value);
+requestAnimationFrame(drawFrame);
+
+// ═══════════════════════════════════════════════
+//  Drag-and-drop on canvas
+// ═══════════════════════════════════════════════
+function canvasPt(e) {
+  const r = canvas.getBoundingClientRect();
+  return {
+    x: (e.clientX - r.left) * (canvas.width  / r.width),
+    y: (e.clientY - r.top)  * (canvas.height / r.height)
+  };
+}
+function hitOverlay(p) {
+  const c = getConf();
+  return overlayImg &&
+    p.x >= overlayPos.x && p.x <= overlayPos.x + c.ovW &&
+    p.y >= overlayPos.y && p.y <= overlayPos.y + c.ovH;
+}
+function hitTitle(p) {
+  const c = getConf();
+  if (!c.titleText) return false;
+  const w = c.titleText.length * c.titleSize * 0.55;
+  return p.x >= titlePos.x && p.x <= titlePos.x + w &&
+         p.y >= titlePos.y - c.titleSize && p.y <= titlePos.y + 8;
+}
+function hitSub(p) {
+  // draggable band ±20 px around the subtitle baseline
+  return Math.abs(p.y - (canvas.height - subPos.y)) < 20;
+}
+
+canvas.addEventListener('mousedown', e => {
+  const p = canvasPt(e);
+  if (hitOverlay(p)) {
+    dragging  = 'overlay';
+    dragStart = { mx: p.x, my: p.y, ox: overlayPos.x, oy: overlayPos.y };
+  } else if (hitTitle(p)) {
+    dragging  = 'title';
+    dragStart = { mx: p.x, my: p.y, ox: titlePos.x, oy: titlePos.y };
+  } else if (hitSub(p)) {
+    dragging  = 'sub';
+    dragStart = { my: p.y, oy: subPos.y };
+  }
+  if (dragging) canvas.style.cursor = 'grabbing';
+});
+canvas.addEventListener('mousemove', e => {
+  const p = canvasPt(e);
+  if (!dragging) {
+    canvas.style.cursor = (hitOverlay(p) || hitTitle(p) || hitSub(p)) ? 'grab' : 'crosshair';
+    return;
+  }
+  const dx = p.x - (dragStart.mx || 0);
+  const dy = p.y - dragStart.my;
+  if (dragging === 'overlay') {
+    overlayPos.x = Math.round(dragStart.ox + dx);
+    overlayPos.y = Math.round(dragStart.oy + dy);
+    document.getElementById('overlayX').value = overlayPos.x;
+    document.getElementById('overlayY').value = overlayPos.y;
+  } else if (dragging === 'title') {
+    titlePos.x = Math.round(dragStart.ox + dx);
+    titlePos.y = Math.round(dragStart.oy + dy);
+    document.getElementById('titleX').value = titlePos.x;
+    document.getElementById('titleY').value = titlePos.y;
+  } else if (dragging === 'sub') {
+    // dragging UP (dy < 0) increases the bottom margin = moves subs higher
+    subPos.y = Math.max(0, Math.round(dragStart.oy - dy));
+    document.getElementById('subY').value     = subPos.y;
+    document.getElementById('subYRange').value = subPos.y;
+    document.getElementById('subYNum').value   = subPos.y;
+  }
+});
+canvas.addEventListener('mouseup',    () => { dragging = null; canvas.style.cursor = 'crosshair'; });
+canvas.addEventListener('mouseleave', () => { dragging = null; });
+
+// ═══════════════════════════════════════════════
+//  Overlay file picker → preview + auto-size + aspect
+// ═══════════════════════════════════════════════
+document.getElementById('overlayInput').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    overlayImg    = img;
+    overlayAspect = img.naturalWidth / img.naturalHeight;
+    document.getElementById('overlayW').value = img.naturalWidth;
+    document.getElementById('overlayH').value = img.naturalHeight;
+  };
+  img.src = url;
+  const thumb = document.getElementById('overlayThumb');
+  thumb.src = url;
+  thumb.style.display = 'block';
+});
+
+// ═══════════════════════════════════════════════
+//  Aspect-ratio lock for overlay size inputs
+// ═══════════════════════════════════════════════
+const lockAspect = document.getElementById('lockAspect');
+const overlayWIn = document.getElementById('overlayW');
+const overlayHIn = document.getElementById('overlayH');
+overlayWIn.addEventListener('input', () => {
+  if (lockAspect.checked && overlayAspect)
+    overlayHIn.value = Math.round(parseInt(overlayWIn.value) / overlayAspect);
+});
+overlayHIn.addEventListener('input', () => {
+  if (lockAspect.checked && overlayAspect)
+    overlayWIn.value = Math.round(parseInt(overlayHIn.value) * overlayAspect);
+});
+
+// ═══════════════════════════════════════════════
+//  Sync range ↔ number inputs
+// ═══════════════════════════════════════════════
+const titleRange  = document.getElementById('titleSizeRange');
+const titleNum    = document.getElementById('titleSize');
+titleRange.addEventListener('input',  () => { titleNum.value   = titleRange.value; });
+titleNum.addEventListener('input',    () => { titleRange.value = titleNum.value;   });
+
+const subRange = document.getElementById('subSizeRange');
+const subNum   = document.getElementById('subSize');
+subRange.addEventListener('input',  () => { subNum.value   = subRange.value; });
+subNum.addEventListener('input',    () => { subRange.value = subNum.value;   });
+
+const subYRange = document.getElementById('subYRange');
+const subYNum   = document.getElementById('subYNum');
+subYRange.addEventListener('input', () => {
+  subYNum.value = subYRange.value;
+  subPos.y = parseInt(subYRange.value);
+  document.getElementById('subY').value = subPos.y;
+});
+subYNum.addEventListener('input', () => {
+  subYRange.value = subYNum.value;
+  subPos.y = parseInt(subYNum.value);
+  document.getElementById('subY').value = subPos.y;
+});
+</script>
 {% endblock %}

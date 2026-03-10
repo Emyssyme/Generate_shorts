@@ -1,5 +1,6 @@
 import os
 import glob
+import re
 import whisper
 from moviepy import VideoFileClip
 
@@ -68,6 +69,16 @@ def subdivide_segment(segment, max_length):
         current_start += sub_duration
     return sub_segments
 
+def _clean_text(text):
+    """Normalize segment text for SRT output.
+
+    - replace any sequence of whitespace (including newlines) with a single space
+    - strip leading/trailing whitespace
+    """
+    # collapse newlines and other whitespace into single spaces
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def generate_srt(segments, srt_path, max_length):
     """
     Subdivides the transcript segments as needed and writes an SRT file.
@@ -81,9 +92,10 @@ def generate_srt(segments, srt_path, max_length):
         for i, seg in enumerate(all_segments):
             start_ts = format_timestamp(seg["start"])
             end_ts = format_timestamp(seg["end"])
+            text = _clean_text(seg["text"])
             f.write(f"{i+1}\n")
             f.write(f"{start_ts} --> {end_ts}\n")
-            f.write(seg["text"] + "\n\n")
+            f.write(text + "\n\n")
     print(f"Subtitle saved to: {srt_path}")
 
 def process_video(video_path, model, output_folder, max_length):
