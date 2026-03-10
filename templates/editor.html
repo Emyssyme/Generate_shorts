@@ -32,6 +32,17 @@
         <small class="text-muted">Drag overlay / title to reposition. Coordinates are recorded at the video's native resolution and will be scaled for the final render.</small>
       </div>
       <div class="card-body p-0 position-relative">
+        <!-- layer selector for dragging when elements overlap -->
+        <div class="position-absolute top-0 start-0 m-2" style="z-index:10;">
+          <div class="btn-group btn-group-sm" role="group" aria-label="layer selector">
+            <input type="radio" class="btn-check" name="layer" id="layerOverlay" autocomplete="off" checked>
+            <label class="btn btn-outline-light" for="layerOverlay">Overlay</label>
+            <input type="radio" class="btn-check" name="layer" id="layerTitle" autocomplete="off">
+            <label class="btn btn-outline-light" for="layerTitle">Title</label>
+            <input type="radio" class="btn-check" name="layer" id="layerSub" autocomplete="off">
+            <label class="btn btn-outline-light" for="layerSub">Subtitle</label>
+          </div>
+        </div>
         <canvas id="previewCanvas"></canvas>
         <!-- custom controls overlay -->
         <div id="canvasControls" class="position-absolute top-50 start-50 translate-middle"
@@ -282,6 +293,19 @@ function toSec(t) {
 // ═══════════════════════════════════════════════
 //  Canvas live preview
 // ═══════════════════════════════════════════════
+// layer selector logic
+['layerOverlay','layerTitle','layerSub'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) {
+    el.addEventListener('change', () => {
+      if (el.checked) {
+        activeLayer = id.replace('layer','').toLowerCase();
+        console.log('active layer', activeLayer);
+      }
+    });
+  }
+});
+
 const video  = document.getElementById('sourceVideo');
 console.log('video element', video);
 
@@ -324,6 +348,8 @@ let srtEntries    = [];
 let dragging      = null;  // 'overlay' | 'title' | 'sub'
 let dragStart     = {};
 let canvasReady   = false; // true once first frame data is available
+// which layer is currently active for dragging (use selector buttons)
+let activeLayer   = 'overlay';
 
 // helper: read overlay W/H with natural-size fallback when fields are empty
 function getOvWH() {
@@ -411,10 +437,10 @@ function drawFrame() {
   // ── overlay image ────────────────────────────────────────────────────
   if (overlayImg) {
     ctx.drawImage(overlayImg, overlayPos.x, overlayPos.y, c.ovW, c.ovH);
-    // dashed selection box
+    // dashed selection box (highlight when it's the active layer)
     ctx.save();
-    ctx.strokeStyle = 'rgba(0,140,255,0.9)';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = activeLayer === 'overlay' ? 'rgba(255,220,0,0.9)' : 'rgba(0,140,255,0.9)';
+    ctx.lineWidth = activeLayer === 'overlay' ? 3 : 2;
     ctx.setLineDash([6, 3]);
     ctx.strokeRect(overlayPos.x, overlayPos.y, c.ovW, c.ovH);
     ctx.restore();
@@ -429,11 +455,31 @@ function drawFrame() {
     ctx.strokeText(c.titleText, titlePos.x, titlePos.y);
     ctx.fillStyle = c.titleColor;
     ctx.fillText(c.titleText, titlePos.x, titlePos.y);
+    // draw a bounding box when active
+    if (activeLayer === 'title') {
+      const w = c.titleText.length * c.titleSize * 0.55;
+      ctx.strokeStyle = 'rgba(255,220,0,0.9)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6,3]);
+      ctx.strokeRect(titlePos.x, titlePos.y - c.titleSize, w, c.titleSize+8);
+    }
     ctx.restore();
   }
 
   // ── subtitle guide line (always visible so user can drag it) ─────────
   const subBaseline = canvas.height - subPos.y;
+  // highlight when active layer is subtitle
+  if (activeLayer === 'sub') {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,220,0,0.9)';
+    ctx.lineWidth   = 2;
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath();
+    ctx.moveTo(0, subBaseline);
+    ctx.lineTo(canvas.width, subBaseline);
+    ctx.stroke();
+    ctx.restore();
+  }
   ctx.save();
   ctx.strokeStyle = 'rgba(255,220,0,0.5)';
   ctx.lineWidth   = 1;
@@ -486,12 +532,14 @@ function canvasPt(e) {
   };
 }
 function hitOverlay(p) {
+  if (activeLayer !== 'overlay') return false;
   const c = getConf();
   return overlayImg &&
     p.x >= overlayPos.x && p.x <= overlayPos.x + c.ovW &&
     p.y >= overlayPos.y && p.y <= overlayPos.y + c.ovH;
 }
 function hitTitle(p) {
+  if (activeLayer !== 'title') return false;
   const c = getConf();
   if (!c.titleText) return false;
   const w = c.titleText.length * c.titleSize * 0.55;
@@ -499,19 +547,20 @@ function hitTitle(p) {
          p.y >= titlePos.y - c.titleSize && p.y <= titlePos.y + 8;
 }
 function hitSub(p) {
+  if (activeLayer !== 'sub') return false;
   // draggable band ±20 px around the subtitle baseline
   return Math.abs(p.y - (canvas.height - subPos.y)) < 20;
 }
 
 canvas.addEventListener('mousedown', e => {
   const p = canvasPt(e);
-  if (hitOverlay(p)) {
+  if (activeLayer === 'overlay' && hitOverlay(p)) {
     dragging  = 'overlay';
     dragStart = { mx: p.x, my: p.y, ox: overlayPos.x, oy: overlayPos.y };
-  } else if (hitTitle(p)) {
+  } else if (activeLayer === 'title' && hitTitle(p)) {
     dragging  = 'title';
     dragStart = { mx: p.x, my: p.y, ox: titlePos.x, oy: titlePos.y };
-  } else if (hitSub(p)) {
+  } else if (activeLayer === 'sub' && hitSub(p)) {
     dragging  = 'sub';
     dragStart = { my: p.y, oy: subPos.y };
   }
@@ -520,7 +569,10 @@ canvas.addEventListener('mousedown', e => {
 canvas.addEventListener('mousemove', e => {
   const p = canvasPt(e);
   if (!dragging) {
-    canvas.style.cursor = (hitOverlay(p) || hitTitle(p) || hitSub(p)) ? 'grab' : 'crosshair';
+    const hit = (activeLayer === 'overlay' && hitOverlay(p)) ||
+                (activeLayer === 'title' && hitTitle(p)) ||
+                (activeLayer === 'sub' && hitSub(p));
+    canvas.style.cursor = hit ? 'grab' : 'crosshair';
     return;
   }
   const dx = p.x - (dragStart.mx || 0);
