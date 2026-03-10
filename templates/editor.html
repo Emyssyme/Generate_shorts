@@ -31,11 +31,23 @@
         <span class="fw-semibold"><i class="bi bi-play-btn"></i> Live Preview</span>
         <small class="text-muted">Drag overlay / title to reposition. Coordinates are recorded at the video's native resolution and will be scaled for the final render.</small>
       </div>
-      <div class="card-body p-0">
+      <div class="card-body p-0 position-relative">
         <canvas id="previewCanvas"></canvas>
+        <!-- custom controls overlay -->
+        <div id="canvasControls" class="position-absolute top-50 start-50 translate-middle"
+             style="pointer-events:none;">
+          <button id="playPauseBtn" class="btn btn-sm btn-light" 
+                  style="pointer-events:auto; opacity:0.8;">
+            <i class="bi bi-play-fill"></i>
+          </button>
+        </div>
       </div>
     </div>
-    <video id="sourceVideo" controls preload="auto" style="width:100%; border-radius:4px;">
+    <!-- the actual <video> tag drives the canvas but is kept offscreen so it
+         can continue playing while remaining invisible.  using display:none
+         prevents playback in some browsers, so we shrink and hide it instead. -->
+    <video id="sourceVideo" controls preload="auto"
+           style="position:absolute; top:0; left:0; width:1px; height:1px; opacity:0; pointer-events:none;">
       <source src="/preview/{{ job.base_video or job.video }}" type="video/mp4">
     </video>
     {% if job.video != (job.base_video or job.video) %}
@@ -88,13 +100,12 @@
             <input type="file" name="overlay" class="form-control" accept="image/*" id="overlayInput">
           </div>
           {% if job.overlay %}
-          <div class="mb-2 d-flex align-items-center gap-2">
-            <img id="overlayThumb" src="/download/{{ job.overlay }}"
-                 style="max-height:56px; border:1px solid #ddd; border-radius:4px;">
-            <small class="text-muted">{{ job.overlay }}</small>
+          <div class="mb-2">
+            <small class="text-muted">
+              Overlay <strong>{{ job.overlay }}</strong> loaded – use the live
+              preview canvas above to position it and to see subtitles/other elements.
+            </small>
           </div>
-          {% else %}
-          <img id="overlayThumb" style="display:none; max-height:56px; margin-bottom:8px; border:1px solid #ddd; border-radius:4px;">
           {% endif %}
           <div class="row g-2 mb-1">
             <div class="col-5">
@@ -200,7 +211,7 @@
               <label class="form-label">Position (px from bottom)</label>
               <div class="size-row">
                 <input type="range" id="subYRange" min="0" max="500" value="{{ job.sub_y or 30 }}">
-                <input type="number" id="subYNum" class="form-control"
+                <input type="number" name="subYNum" id="subYNum" class="form-control"
                        value="{{ job.sub_y or 30 }}" min="0" max="500">
               </div>
             </div>
@@ -272,6 +283,33 @@ function toSec(t) {
 //  Canvas live preview
 // ═══════════════════════════════════════════════
 const video  = document.getElementById('sourceVideo');
+console.log('video element', video);
+
+// ═══════════════════════════════════════════════
+//  Utility: toggle play/pause button (video defined above)
+function updatePlayPauseIcon() {
+  const btn = document.getElementById('playPauseBtn');
+  if (!btn) return;
+  if (video.paused) {
+    btn.innerHTML = '<i class="bi bi-play-fill"></i>';
+  } else {
+    btn.innerHTML = '<i class="bi bi-pause-fill"></i>';
+  }
+}
+
+// attach click handler for custom control
+const playPauseBtn = document.getElementById('playPauseBtn');
+if (playPauseBtn) {
+  playPauseBtn.addEventListener('click', () => {
+    if (video.paused) video.play();
+    else video.pause();
+    updatePlayPauseIcon();
+  });
+}
+// update icon when video state changes
+video.addEventListener('play', updatePlayPauseIcon);
+video.addEventListener('pause', updatePlayPauseIcon);
+
 const canvas = document.getElementById('previewCanvas');
 const ctx    = canvas.getContext('2d');
 
@@ -312,22 +350,34 @@ function getOvWH() {
 }());
 {% endif %}
 
+// debug events
+['loadedmetadata','loadeddata','canplay','play','pause','error'].forEach(evt => {
+  video.addEventListener(evt, e => console.log('video event', evt, e));
+});
 // loadedmetadata → dimensions known (readyState 1) — resize canvas
 video.addEventListener('loadedmetadata', () => {
+  console.log('loadedmetadata', video.videoWidth, video.videoHeight);
   canvas.width  = video.videoWidth  || 540;
   canvas.height = video.videoHeight || 960;
-  // update hidden fields so server knows the preview dimensions
   document.getElementById('previewW').value = video.videoWidth;
   document.getElementById('previewH').value = video.videoHeight;
 });
 // loadeddata → first frame decoded (readyState >= 2) — safe to drawImage
 video.addEventListener('loadeddata', () => {
+  console.log('loadeddata');
   canvas.width  = video.videoWidth  || canvas.width;
   canvas.height = video.videoHeight || canvas.height;
   canvasReady   = true;
+  video.muted = true;         // most browsers only autoplay muted videos
+  video.play().catch(err => console.log('play promise rejected', err));
 });
 // Also mark ready when the browser can start playing
-video.addEventListener('canplay', () => { canvasReady = true; });
+video.addEventListener('canplay', () => {
+  console.log('canplay');
+  canvasReady = true;
+  video.muted = true;
+  video.play().catch(err => console.log('play promise rejected', err));
+});
 
 function getConf() {
   const { w: ovW, h: ovH } = getOvWH();
@@ -512,8 +562,10 @@ document.getElementById('overlayInput').addEventListener('change', e => {
   };
   img.src = url;
   const thumb = document.getElementById('overlayThumb');
-  thumb.src = url;
-  thumb.style.display = 'block';
+  if (thumb) {
+    thumb.src = url;
+    thumb.style.display = 'block';
+  }
 });
 
 // ═══════════════════════════════════════════════
