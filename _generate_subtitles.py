@@ -82,20 +82,38 @@ def _clean_text(text):
 def generate_srt(segments, srt_path, max_length):
     """
     Subdivides the transcript segments as needed and writes an SRT file.
+
+    After constructing the raw output we perform extra sanitization so
+    that the file never contains more than the canonical single blank line
+    between entries.  This prevents situations where rendering or the web
+    editor ends up showing double/quadruple blank lines.
     """
     all_segments = []
     for seg in segments:
         subs = subdivide_segment(seg, max_length)
         all_segments.extend(subs)
-    
-    with open(srt_path, "w", encoding="utf-8") as f:
-        for i, seg in enumerate(all_segments):
-            start_ts = format_timestamp(seg["start"])
-            end_ts = format_timestamp(seg["end"])
-            text = _clean_text(seg["text"])
-            f.write(f"{i+1}\n")
-            f.write(f"{start_ts} --> {end_ts}\n")
-            f.write(text + "\n\n")
+
+    # build output in memory first so we can normalize line breaks
+    lines = []
+    for i, seg in enumerate(all_segments):
+        start_ts = format_timestamp(seg["start"])
+        end_ts = format_timestamp(seg["end"])
+        text = _clean_text(seg["text"])
+
+        lines.append(str(i + 1))
+        lines.append(f"{start_ts} --> {end_ts}")
+        # even if text is empty we include the line so timing is preserved
+        lines.append(text)
+        lines.append("")  # blank separator
+
+    content = "\n".join(lines).strip() + "\n"
+    # collapse runs of 3+ newlines into exactly two (one blank line)
+    content = re.sub(r"\n{3,}", "\n\n", content)
+
+    # write with explicit newline to avoid platform conversions
+    with open(srt_path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(content)
+
     print(f"Subtitle saved to: {srt_path}")
 
 def process_video(video_path, model, output_folder, max_length):

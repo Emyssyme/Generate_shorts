@@ -575,14 +575,20 @@ def editor(job_id):
     srt_text = ''
     if os.path.exists(srt_path):
         with open(srt_path, encoding='utf-8') as f:
-            srt_text = f.read().strip()
+            # normalize line endings and collapse excessive blank lines
+            raw = f.read()
+        srt_text = re.sub(r"\r\n?|\n", "\n", raw).strip()
+        srt_text = re.sub(r"\n{3,}", "\n\n", srt_text)
 
     if request.method == 'POST':
         # ── save SRT edits ────────────────────────────────────────────────
         # strip accumulated leading/trailing whitespace so every save is clean
         new_srt = request.form.get('srt_text', '').strip()
+        # normalize before saving to keep file tidy
+        new_srt = re.sub(r"\r\n?|\n", "\n", new_srt)
+        new_srt = re.sub(r"\n{3,}", "\n\n", new_srt)
         if os.path.exists(srt_path):
-            with open(srt_path, 'w', encoding='utf-8') as f:
+            with open(srt_path, 'w', encoding='utf-8', newline='\n') as f:
                 f.write(new_srt)
         srt_text = new_srt
 
