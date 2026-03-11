@@ -1,0 +1,26 @@
+{
+  "J14973": {
+    "status": "completed",
+    "video": "job_J24825_unsilenced_processed_h264.mp4",
+    "srt": "job_J24825_unsilenced_processed_h264.srt",
+    "base_video": "job_J24825_unsilenced_processed_h264.mp4",
+    "title_text": "",
+    "title_font": "Arial",
+    "title_color": "#ffffff",
+    "title_stroke_color": "#000000",
+    "title_size": "48",
+    "title_x": "10",
+    "title_y": "80",
+    "sub_font": "Arial",
+    "sub_color": "#ffffff",
+    "sub_stroke_color": "#000000",
+    "sub_size": "52",
+    "sub_y": "500",
+    "overlay_x": "10",
+    "overlay_y": "10",
+    "overlay_w": "",
+    "overlay_h": "",
+    "preview_w": 1080.0,
+    "preview_h": 1920.0
+  }
+}

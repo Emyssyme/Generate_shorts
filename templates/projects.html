@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block content %}
+<h4>Projects</h4>
+<p class="mb-3">Manage existing jobs (projects). You can edit or delete them.</p>
+<table class="table table-sm">
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>Status</th>
+      <th>Video</th>
+      <th>SRT</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for jid, job in jobs.items() %}
+    <tr>
+      <td>{{ jid }}</td>
+      <td>{{ job.status }}</td>
+      <td>
+        {% if job.video %}
+          <a href="/download/{{ job.video }}" target="_blank">{{ job.video }}</a>
+        {% endif %}
+      </td>
+      <td>
+        {% if job.srt %}
+          <a href="/download/{{ job.srt }}" target="_blank">{{ job.srt }}</a>
+        {% endif %}
+      </td>
+      <td>
+        <a href="{{ url_for('editor', job_id=jid) }}" class="btn btn-sm btn-outline-primary me-1">Edit</a>
+        <form method="post" action="{{ url_for('delete_project', job_id=jid) }}" style="display:inline;">
+          <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Delete project {{ jid }}?');">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

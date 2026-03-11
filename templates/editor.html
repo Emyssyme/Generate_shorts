@@ -241,7 +241,10 @@
       </div><!-- /tab-content -->
 
       <div class="d-flex gap-2">
-        <button type="submit" class="btn btn-primary" id="renderBtn">
+        <button type="submit" name="save" value="1" class="btn btn-secondary" id="saveBtn">
+          <i class="bi bi-save"></i> Save Settings
+        </button>
+        <button type="submit" class="btn btn-primary" id="renderBtn" name="render" value="1">
           <i class="bi bi-film"></i> Render Video
         </button>
         <a href="/download/{{ job.video }}" class="btn btn-outline-success">
@@ -304,13 +307,15 @@ if (editForm) {
       lines.splice(start, end - start + 1, ...newTextLines);
       ta.value = lines.join('\n');
     }
-    const btn = document.getElementById('renderBtn');
-    if (btn) {
-      btn.disabled = true;
-      btn.innerHTML =
-        '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Rendering...';
+    // only disable/render when the render button was clicked
+    if (e.submitter && e.submitter.id === 'renderBtn') {
+      const btn = document.getElementById('renderBtn');
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML =
+          '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Rendering...';
+      }
     }
-
   });
 }
 

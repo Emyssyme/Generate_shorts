@@ -127,8 +127,26 @@ def store_cache(url, start, end, video, srt, skip_unsilence=False):
 # initialize the cache when the module loads
 init_cache()
 
-# in‑memory job state
-active_jobs = {}
+# in‑memory job state (persisted to disk)
+JOBS_FILE = os.path.join(BASE_DIR, "jobs.json")
+
+def load_jobs():
+    if os.path.exists(JOBS_FILE):
+        try:
+            with open(JOBS_FILE, encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"warning: failed to load jobs file: {e}")
+    return {}
+
+def save_jobs():
+    try:
+        with open(JOBS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(active_jobs, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"warning: failed to save jobs file: {e}")
+
+active_jobs = load_jobs()
 
 # ---------------------------------------------------------------------------
 # Editor: font mapping (Windows system fonts) and colour helpers
@@ -294,6 +312,8 @@ def update_job(job_id, status=None, log=None, **kwargs):
         except Exception:
             pass
     job.update(kwargs)
+    # persist immediately
+    save_jobs()
 
 
 def run_unsilence(input_video, output_video, job_id=None):
@@ -558,6 +578,32 @@ def index():
     return redirect(url_for('login'))
 
 
+@app.route('/projects')
+@login_required
+def list_projects():
+    # show simple table of all jobs with edit/delete links
+    return render_template('projects.html', jobs=active_jobs)
+
+
+@app.route('/delete_project/<job_id>', methods=['POST'])
+@login_required
+def delete_project(job_id):
+    # remove job state and any downloaded files
+    job = active_jobs.pop(job_id, None)
+    if job:
+        for key in ('video','srt'):
+            if job.get(key):
+                try:
+                    os.remove(os.path.join(DOWNLOADS_DIR, job[key]))
+                except Exception:
+                    pass
+        flash(f'Project {job_id} deleted', 'info')
+        save_jobs()
+    else:
+        flash(f'Project {job_id} not found', 'warning')
+    return redirect(url_for('list_projects'))
+
+
 @app.route('/editor/<job_id>', methods=['GET', 'POST'])
 @login_required
 def editor(job_id):
@@ -581,6 +627,7 @@ def editor(job_id):
         srt_text = re.sub(r"\n{3,}", "\n\n", srt_text)
 
     if request.method == 'POST':
+        save_only = request.form.get('save') == '1'
         # ── save SRT edits ────────────────────────────────────────────────
         # strip accumulated leading/trailing whitespace so every save is clean
         new_srt = request.form.get('srt_text', '').strip()
@@ -623,6 +670,8 @@ def editor(job_id):
             'overlay_w': overlay_w,    'overlay_h': overlay_h,
             'preview_w': prev_w, 'preview_h': prev_h,
         })
+        # when saving settings without running ffmpeg we still need to persist
+        save_jobs()
 
         # ── handle overlay upload ─────────────────────────────────────────
         overlay_file = request.files.get('overlay')
@@ -631,6 +680,11 @@ def editor(job_id):
             overlay_file.save(os.path.join(DOWNLOADS_DIR, safe_name))
             job['overlay'] = safe_name
         overlay_filename = job.get('overlay')
+
+        # if the request only wanted to save settings, abort before rendering
+        if save_only:
+            flash('Project settings saved', 'success')
+            return redirect(url_for('editor', job_id=job_id))
 
         # ── build ffmpeg command ──────────────────────────────────────────
         orig_video     = os.path.basename(base_video)
