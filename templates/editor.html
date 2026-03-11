@@ -8,6 +8,7 @@
   .size-row { display:flex; align-items:center; gap:8px; }
   .size-row input[type=range] { flex:1; }
   .size-row input[type=number] { width:72px; }
+  #subtitleDisplay .highlight { background: yellow; color: black; }
 </style>
 
 <div class="d-flex justify-content-between align-items-center mb-3">
@@ -247,6 +248,21 @@
           <i class="bi bi-download"></i> Download
         </a>
       </div>
+      <!-- subtitles/editor and highlight controls moved here -->
+      <div class="mt-3">
+        <label class="form-label">Current subtitle (editable):</label>
+        <div id="subtitleDisplay" class="bg-dark text-white p-1 rounded" contenteditable="true" style="min-height:1.5em;" spellcheck="false"></div>
+        <div class="mt-1 text-end">
+          <button type="button" id="highlightBtn" class="btn btn-sm btn-warning">Highlight Selection</button>
+        </div>
+        <div class="mt-1">
+          <small>Highlights: <span id="highlightList" class="fw-bold"></span></small>
+        </div>
+      </div>
+      <!-- time navigation slider -->
+      <div class="mt-3">
+        <input type="range" id="timeSlider" min="0" max="0" step="0.01" class="form-range">
+      </div>
     </form>
   </div>
 </div>
@@ -258,11 +274,92 @@ const editForm = document.getElementById('editForm');
 if (editForm) {
   editForm.addEventListener('submit', e => {
     console.log('form submitting');
+    // update current subtitle entry (tracked by index) and rewrite only that part of the
+    // textarea; this keeps the rest of the file exactly as the user originally generated it.
+    const disp = document.getElementById('subtitleDisplay');
+    const ta = document.getElementById('srtTextarea');
+    if (disp && ta && currentSubIndex !== -1 && srtEntries[currentSubIndex]) {
+      // convert highlights to <font> tags
+      let html = disp.innerHTML;
+      html = html.replace(/<span[^>]*class="highlight"[^>]*>(.*?)<\/span>/g, '<font color="yellow">$1</font>');
+      srtEntries[currentSubIndex].text = html;
+      // rebuild textarea lines around the current entry
+      const lines = ta.value.split('\n');
+      const entry = srtEntries[currentSubIndex];
+      const newTextLines = html.split('\n');
+      const start = entry.startLine + 2;
+      const end = entry.endLine;
+      lines.splice(start, end - start + 1, ...newTextLines);
+      ta.value = lines.join('\n');
+    }
     const btn = document.getElementById('renderBtn');
     if (btn) {
       btn.disabled = true;
       btn.innerHTML =
         '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Rendering...';
+    }
+
+  });
+}
+
+// helper to update subtitle display box
+function setSubtitleText(text) {
+  const disp = document.getElementById('subtitleDisplay');
+  if (!disp) return;
+  // preserve HTML highlights when text is unchanged
+  if (disp.textContent !== text) {
+    disp.textContent = text;
+  }
+}
+
+// highlight selected word(s) in subtitleDisplay and track them.  Use mousedown so
+// we grab the selection before the button steals focus (which collapses the
+// selection).
+const highlightBtn = document.getElementById('highlightBtn');
+const highlightListEl = document.getElementById('highlightList');
+let highlights = []; // array of strings
+function refreshHighlights() {
+  if (!highlightListEl) return;
+  highlightListEl.innerHTML = '';
+  highlights.forEach((h,i) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn-sm btn-outline-secondary me-1';
+    btn.textContent = h;
+    btn.addEventListener('click', () => {
+      // remove highlight span from display
+      const disp = document.getElementById('subtitleDisplay');
+      if (disp) {
+        const spans = disp.querySelectorAll('span.highlight');
+        spans.forEach(s => { if (s.textContent === h) s.replaceWith(s.textContent); });
+      }
+      highlights.splice(i,1);
+      refreshHighlights();
+    });
+    highlightListEl.appendChild(btn);
+  });
+}
+if (highlightBtn) {
+  highlightBtn.addEventListener('mousedown', e => {
+    e.preventDefault();
+    const disp = document.getElementById('subtitleDisplay');
+    if (!disp) return;
+    const sel = window.getSelection();
+    if (!sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    if (!disp.contains(range.commonAncestorContainer)) return;
+    const span = document.createElement('span');
+    span.className = 'highlight';
+    const text = range.toString();
+    try {
+      range.surroundContents(span);
+    } catch (err) {
+      // selection may cross nodes; fallback to execCommand
+      document.execCommand('hiliteColor', false, 'yellow');
+    }
+    if (text) {
+      highlights.push(text);
+      refreshHighlights();
     }
   });
 }
@@ -272,12 +369,19 @@ if (editForm) {
 // ═══════════════════════════════════════════════
 function parseSRT(text) {
   const entries = [];
-  for (const block of text.trim().split(/\n\s*\n/)) {
-    const lines = block.trim().split('\n');
+  const blocks = text.trim().split(/\n\s*\n/);
+  let lineCursor = 0;
+  for (const block of blocks) {
+    const lines = block.split('\n');
+    const startLine = lineCursor;
+    const endLine = lineCursor + lines.length - 1;
+    lineCursor += lines.length + 1; // account for separator
     if (lines.length < 3) continue;
     const m = lines[1].match(/(\d{2}:\d{2}:\d{2}[,.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,.]\d{3})/);
     if (!m) continue;
     entries.push({
+      raw: block,
+      startLine, endLine,
       start: toSec(m[1]),
       end:   toSec(m[2]),
       text:  lines.slice(2).join('\n').replace(/<[^>]+>/g, '')
@@ -345,6 +449,7 @@ let titlePos      = { x: {{ job.title_x   | default(10) | int }},
                       y: {{ job.title_y   | default(80) | int }} };
 let subPos        = { y: {{ job.sub_y     | default(30) | int }} };  // px from bottom
 let srtEntries    = [];
+let currentSubIndex = -1;
 let dragging      = null;  // 'overlay' | 'title' | 'sub'
 let dragStart     = {};
 let canvasReady   = false; // true once first frame data is available
@@ -387,6 +492,9 @@ video.addEventListener('loadedmetadata', () => {
   canvas.height = video.videoHeight || 960;
   document.getElementById('previewW').value = video.videoWidth;
   document.getElementById('previewH').value = video.videoHeight;
+  // initialize time slider max
+  const slider = document.getElementById('timeSlider');
+  if (slider) slider.max = video.duration || 0;
 });
 // loadeddata → first frame decoded (readyState >= 2) — safe to drawImage
 video.addEventListener('loadeddata', () => {
@@ -404,6 +512,21 @@ video.addEventListener('canplay', () => {
   video.muted = true;
   video.play().catch(err => console.log('play promise rejected', err));
 });
+
+// time slider update and seek
+const timeSlider = document.getElementById('timeSlider');
+if (timeSlider) {
+  timeSlider.dragging = false;
+  timeSlider.addEventListener('mousedown', () => { timeSlider.dragging = true; });
+  timeSlider.addEventListener('mouseup', () => { timeSlider.dragging = false; });
+  timeSlider.addEventListener('input', () => {
+    video.currentTime = parseFloat(timeSlider.value);
+  });
+  video.addEventListener('timeupdate', () => {
+    if (!timeSlider.dragging) timeSlider.value = video.currentTime;
+  });
+}
+
 
 function getConf() {
   const { w: ovW, h: ovH } = getOvWH();
@@ -492,8 +615,16 @@ function drawFrame() {
 
   // ── current subtitle ─────────────────────────────────────────────────
   const t   = video.currentTime;
-  const sub = srtEntries.find(e => t >= e.start && t <= e.end);
+  const idx = srtEntries.findIndex(e => t >= e.start && t <= e.end);
+  let sub = null;
+  if (idx !== -1) {
+    sub = srtEntries[idx];
+    currentSubIndex = idx;
+  } else {
+    currentSubIndex = -1;
+  }
   if (sub) {
+    setSubtitleText(sub.text);
     const lines = sub.text.split('\n');
     const lh    = c.subSize * 1.4;
     ctx.save();
@@ -509,6 +640,8 @@ function drawFrame() {
       ctx.fillText(line, cx, y);
     });
     ctx.restore();
+  } else {
+    setSubtitleText('');
   }
 
   requestAnimationFrame(drawFrame);
