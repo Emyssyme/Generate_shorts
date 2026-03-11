@@ -834,7 +834,7 @@ def editor(job_id):
 
 if __name__ == '__main__':
     # allow port overridable by PORT env variable for hosting platforms
-    port = int(os.getenv('PORT', 5000))
+    port = int(os.getenv('PORT', 5015))
     debug = os.getenv('FLASK_DEBUG', '1') == '1'
     # run via socketio to support websockets
     socketio.run(app, host='0.0.0.0', port=port, debug=debug, use_reloader=False)
