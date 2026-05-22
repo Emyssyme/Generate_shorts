@@ -1,36 +1,48 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="container">
-    <div class="card p-4 shadow-sm">
-        <h4><i class="bi bi-scissors"></i> Process Video Clip</h4>
+<div class="row justify-content-center">
+  <div class="col-lg-6 col-md-8">
+    <div class="card">
+      <div class="card-header py-3">
+        <h5 class="mb-0 fw-bold"><i class="bi bi-scissors"></i> New Clip</h5>
+        <small class="text-muted">Import a video to start editing</small>
+      </div>
+      <div class="card-body p-4">
         <form id="cutForm" enctype="multipart/form-data">
             <div class="mb-3">
-                <label class="form-label">YouTube link (optional):</label>
-                <input type="text" name="url" class="form-control" placeholder="https://www.youtube.com/watch?v=...">
+                <label class="form-label fw-semibold">YouTube link <span class="text-muted fw-normal">(optional)</span></label>
+                <div class="input-group">
+                  <span class="input-group-text" style="background:var(--surface2);border-color:var(--border);"><i class="bi bi-youtube"></i></span>
+                  <input type="text" name="url" class="form-control" placeholder="https://www.youtube.com/watch?v=...">
+                </div>
             </div>
-            <div class="mb-3">
-                <label class="form-label">Or upload file:</label>
+            <div class="mb-4">
+                <label class="form-label fw-semibold">Or upload a local file</label>
                 <input type="file" name="file" class="form-control" accept="video/*">
+            </div>
+            <div class="row mb-3">
+                <div class="col-6">
+                    <label class="form-label small fw-semibold">Start <span class="text-muted">(sec / hh:mm:ss)</span></label>
+                    <input type="text" name="start_time" class="form-control form-control-sm" placeholder="0:00 or 80" value="0">
+                </div>
+                <div class="col-6">
+                    <label class="form-label small fw-semibold">End <span class="text-muted">(sec / hh:mm:ss)</span></label>
+                    <input type="text" name="end_time" class="form-control form-control-sm" placeholder="2:45 or 165">
+                </div>
             </div>
             <div class="mb-3 form-check">
                 <input type="checkbox" name="skip_unsilence" class="form-check-input" id="skipUnsilence">
-                <label class="form-check-label" for="skipUnsilence">Skip unsilence step (already quiet audio)</label>
+                <label class="form-check-label small" for="skipUnsilence">Skip audio cleanup (already has quiet audio)</label>
             </div>
-            <div class="row mb-3">
-                <div class="col">
-                    <label class="form-label">Start (sec or hh:mm:ss):</label>
-                    <input type="text" name="start_time" class="form-control" placeholder="ex: 01:20 or 80" value="0">
-                </div>
-                <div class="col">
-                    <label class="form-label">End (sec or hh:mm:ss):</label>
-                    <input type="text" name="end_time" class="form-control" placeholder="ex: 02:45 or 165">
-                </div>
-            </div>
-            <button type="submit" class="btn btn-primary w-100">Start Processing</button>
+            <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold">
+              <i class="bi bi-lightning-charge-fill"></i> Start Processing
+            </button>
         </form>
+      </div>
     </div>
 
     <div id="status-container" class="mt-4"></div>
+  </div>
 </div>
 
 <script>
@@ -39,18 +51,20 @@
         const jobId = "J" + Math.floor(Math.random() * 100000);
         const formData = new FormData(e.target);
         formData.append('job_id', jobId);
-        // include checkbox value (FormData handles it automatically if checked)
 
         const cardHtml = `
-            <div id="card-${jobId}" class="alert alert-secondary border mb-3">
-                <div class="d-flex justify-content-between align-items-center">
+            <div id="card-${jobId}" class="card mb-3">
+              <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
                     <div>
-                        <strong>Job #${jobId}</strong>: <span id="status-${jobId}">Initializing...</span>
-                        <div id="spinner-${jobId}" class="spinner-border spinner-border-sm text-primary"></div>
+                        <span class="fw-semibold">Job #${jobId}</span>
+                        <span id="status-${jobId}" class="badge ms-2" style="background:var(--accent);">Initializing...</span>
+                        <div id="spinner-${jobId}" class="spinner-border spinner-border-sm ms-2" style="color:var(--accent);"></div>
                     </div>
                 </div>
-                <div id="links-${jobId}" class="mt-2"></div>
-                <pre id="log-${jobId}" class="small bg-light p-2 mt-2" style="height:100px; overflow:auto;"></pre>
+                <div id="links-${jobId}" class="d-flex flex-wrap gap-2 mb-2"></div>
+                <pre id="log-${jobId}" class="log-box" style="max-height:120px;"></pre>
+              </div>
             </div>
         `;
         document.getElementById('status-container').insertAdjacentHTML('afterbegin', cardHtml);
@@ -61,35 +75,36 @@
             const response = await fetch('/check-job/' + jobId);
             const data = await response.json();
 
-            if (data.status === 'running' || data.status === 'starting' || data.status === 'downloading' || data.status === 'cutting' || data.status === 'unsilencing' || data.status === 'cropping' || data.status === 'subtitling') {
+            if (['running','starting','downloading','cutting','unsilencing','cropping','subtitling'].includes(data.status)) {
                 document.getElementById('status-' + jobId).innerText = data.status;
-            } 
+            }
             else if (data.status === 'completed') {
                 clearInterval(interval);
-                document.getElementById('status-' + jobId).innerText = "Completed!";
-                document.getElementById('card-' + jobId).className = "alert alert-success border mb-3";
+                document.getElementById('status-' + jobId).innerText = "Done!";
+                document.getElementById('status-' + jobId).style.background = 'var(--accent2)';
+                document.getElementById('card-' + jobId).style.borderColor = 'var(--accent2)';
                 document.getElementById('spinner-' + jobId).remove();
-                let links = `<a href='/download/${data.video}' class='btn btn-success btn-sm w-100 mb-1'>Download video</a>`;
+                let links = `<a href='/download/${data.video}' class='btn btn-sm' style='background:var(--accent2);color:#fff;'>Download</a>`;
                 if (data.srt) {
-                    links += `<a href='/download/${data.srt}' class='btn btn-secondary btn-sm w-100 mb-1'>Download subtitles</a>`;
-                    links += `<a href='/editor/${jobId}' class='btn btn-primary btn-sm w-100'>Edit</a>`;
+                    links += `<a href='/download/${data.srt}' class='btn btn-sm btn-outline-secondary'>SRT</a>`;
+                    links += `<a href='/editor/${jobId}' class='btn btn-sm btn-primary'>Edit</a>`;
                 }
                 document.getElementById('links-' + jobId).innerHTML = links;
-            } 
+            }
             else if (data.status === 'error') {
                 clearInterval(interval);
-                document.getElementById('status-' + jobId).innerText = "Error: " + data.msg;
-                document.getElementById('card-' + jobId).className = "alert alert-danger border mb-3";
+                document.getElementById('status-' + jobId).innerText = "Error";
+                document.getElementById('status-' + jobId).style.background = 'var(--danger)';
                 document.getElementById('spinner-' + jobId).remove();
+                document.getElementById('log-' + jobId).textContent = data.msg || 'Unknown error';
             }
 
-            // append log lines if any
             if (data.log) {
                 const logEl = document.getElementById('log-' + jobId);
-                logEl.textContent = data.log.join("\n");
+                logEl.textContent = data.log.slice(-20).join("\n");
                 logEl.scrollTop = logEl.scrollHeight;
             }
-        }, 3000);
+        }, 2000);
     };
 </script>
 {% endblock %}

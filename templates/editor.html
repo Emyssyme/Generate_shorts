@@ -1,26 +1,70 @@
 {% extends "base.html" %}
 {% block content %}
 <style>
-  /* height:auto keeps the correct aspect ratio when width:100% shrinks the canvas */
-  #previewCanvas { display:block; width:100%; height:auto; background:#111; border-radius:4px; cursor:crosshair; }
-  .tab-content.bordered { border:1px solid #dee2e6; border-top:none; border-radius:0 0 .375rem .375rem; }
-  .form-control-color { height:38px; padding:2px 4px; }
+  #previewCanvas { display:block; width:100%; height:auto; max-height:70vh; background:#000; border-radius:10px; cursor:crosshair; border:1px solid var(--border); object-fit:contain; }
+  .tab-content.bordered { border:1px solid var(--border); border-top:none; border-radius:0 0 10px 10px; background:var(--surface); }
+  .form-control-color { height:40px; padding:3px 5px; min-width:60px; }
   .size-row { display:flex; align-items:center; gap:8px; }
-  .size-row input[type=range] { flex:1; }
+  .size-row input[type=range] { flex:1; accent-color:var(--accent); }
   .size-row input[type=number] { width:72px; }
-  #subtitleDisplay .highlight { background: yellow; color: black; }
+  #subtitleDisplay .highlight { background: #e5b800; color: #000; border-radius:3px; padding:0 2px; }
+  .template-bar {
+    display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+    padding:10px 14px; background:var(--surface); border:1px solid var(--border);
+    border-radius:10px; margin-bottom:14px;
+  }
+  .template-bar .section-title { margin-bottom:0; margin-right:6px; }
+  .layer-btn-group .btn {
+    font-size:0.78rem; padding:3px 10px; border-radius:6px;
+    background:var(--surface2); color:var(--text-muted); border:1px solid var(--border);
+  }
+  .layer-btn-group .btn.active {
+    background:var(--accent); color:#fff; border-color:var(--accent);
+  }
+  #canvasControls { pointer-events:none; transition:opacity .3s; }
+  #canvasControls.show { opacity:1; }
+  #canvasControls.hide { opacity:0; }
+  .empty-state { text-align:center; padding:30px; color:var(--text-muted); }
+  .empty-state i { font-size:2.5rem; opacity:.4; }
+  .control-panel { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:14px; margin-bottom:10px; }
 </style>
 
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h4 class="mb-0">Video Editor &mdash; <code>{{ job_key }}</code></h4>
+<div class="d-flex flex-wrap justify-content-between align-items-center mb-3">
   <div>
-    <a href="/download/{{ job.video }}" class="btn btn-sm btn-success me-1">
+    <h4 class="mb-0 fw-bold" style="letter-spacing:-0.02em;">
+      <i class="bi bi-film"></i> Edit Clip
+      <span class="text-muted fw-normal fs-6 ms-2">{{ job_key }}</span>
+    </h4>
+  </div>
+  <div class="d-flex gap-2 mt-2 mt-md-0">
+    <a href="/download/{{ job.video }}" class="btn btn-sm" style="background:var(--accent2);color:#fff;">
       <i class="bi bi-download"></i> Download
     </a>
     <a href="{{ url_for('video_cut') }}" class="btn btn-sm btn-outline-secondary">
       <i class="bi bi-arrow-left"></i> Back
     </a>
   </div>
+</div>
+
+<!-- ══════════ TEMPLATE / PRESET BAR ══════════ -->
+<div class="template-bar">
+  <span class="section-title"><i class="bi bi-layers"></i> Template</span>
+  <select id="templateSelect" class="form-select form-select-sm" style="width:auto;min-width:160px;">
+    <option value="">— no template —</option>
+    {% for t in templates %}
+    <option value="{{ t.name }}">{{ t.name }}</option>
+    {% endfor %}
+  </select>
+  <button class="btn btn-sm btn-outline-secondary" id="loadTemplateBtn" title="Load selected template">
+    <i class="bi bi-box-arrow-in-down"></i> Load
+  </button>
+  <button class="btn btn-sm btn-outline-secondary" id="saveTemplateBtn" title="Save current settings as template">
+    <i class="bi bi-save"></i> Save As...
+  </button>
+  <button class="btn btn-sm btn-outline-danger" id="deleteTemplateBtn" title="Delete selected template">
+    <i class="bi bi-trash"></i>
+  </button>
+  <span id="templateMsg" class="small" style="margin-left:4px;"></span>
 </div>
 
 <div class="row g-3">
@@ -30,42 +74,38 @@
     <div class="card mb-2">
       <div class="card-header py-2 d-flex justify-content-between align-items-center">
         <span class="fw-semibold"><i class="bi bi-play-btn"></i> Live Preview</span>
-        <small class="text-muted">Drag overlay / title to reposition. Coordinates are recorded at the video's native resolution and will be scaled for the final render.</small>
+        <small class="text-muted d-none d-md-block">Drag elements on canvas to reposition</small>
       </div>
       <div class="card-body p-0 position-relative">
-        <!-- layer selector for dragging when elements overlap -->
+        <!-- layer selector -->
         <div class="position-absolute top-0 start-0 m-2" style="z-index:10;">
-          <div class="btn-group btn-group-sm" role="group" aria-label="layer selector">
+          <div class="btn-group btn-group-sm layer-btn-group" role="group">
             <input type="radio" class="btn-check" name="layer" id="layerOverlay" autocomplete="off" checked>
-            <label class="btn btn-outline-light" for="layerOverlay">Overlay</label>
+            <label class="btn" for="layerOverlay"><i class="bi bi-image"></i> Logo</label>
             <input type="radio" class="btn-check" name="layer" id="layerTitle" autocomplete="off">
-            <label class="btn btn-outline-light" for="layerTitle">Title</label>
+            <label class="btn" for="layerTitle"><i class="bi bi-fonts"></i> Title</label>
             <input type="radio" class="btn-check" name="layer" id="layerSub" autocomplete="off">
-            <label class="btn btn-outline-light" for="layerSub">Subtitle</label>
+            <label class="btn" for="layerSub"><i class="bi bi-card-text"></i> Subs</label>
           </div>
         </div>
         <canvas id="previewCanvas"></canvas>
-        <!-- custom controls overlay -->
-        <div id="canvasControls" class="position-absolute top-50 start-50 translate-middle"
+        <div id="canvasControls" class="position-absolute top-50 start-50 translate-middle show"
              style="pointer-events:none;">
-          <button id="playPauseBtn" class="btn btn-sm btn-light" 
-                  style="pointer-events:auto; opacity:0.8;">
-            <i class="bi bi-play-fill"></i>
+          <button id="playPauseBtn" class="btn btn-sm btn-light rounded-circle shadow"
+                  style="pointer-events:auto; width:44px; height:44px; opacity:0.85;">
+            <i class="bi bi-play-fill fs-5"></i>
           </button>
         </div>
       </div>
     </div>
-    <!-- the actual <video> tag drives the canvas but is kept offscreen so it
-         can continue playing while remaining invisible.  using display:none
-         prevents playback in some browsers, so we shrink and hide it instead. -->
-    <video id="sourceVideo" controls preload="auto"
+    <video id="sourceVideo" controls preload="auto" crossorigin="anonymous"
            style="position:absolute; top:0; left:0; width:1px; height:1px; opacity:0; pointer-events:none;">
       <source src="/preview/{{ job.base_video or job.video }}" type="video/mp4">
     </video>
     {% if job.video != (job.base_video or job.video) %}
-    <div class="mt-2">
-      <p class="text-muted small mb-1">Last rendered output:</p>
-      <video controls style="width:100%; border-radius:4px;">
+    <div class="control-panel">
+      <span class="section-title"><i class="bi bi-check-circle"></i> Last Rendered Output</span>
+      <video controls style="width:100%; border-radius:8px;">
         <source src="/download/{{ job.video }}" type="video/mp4">
       </video>
     </div>
@@ -75,15 +115,15 @@
   <!-- ══════════ RIGHT: tabbed controls ══════════ -->
   <div class="col-xl-7 col-lg-6">
     <form method="post" enctype="multipart/form-data" id="editForm" novalidate>
-      <!-- Hidden position fields kept in sync by drag JS -->
+      <!-- Hidden position fields -->
       <input type="hidden" name="overlay_x" id="overlayX" value="{{ job.overlay_x or 10 }}">
       <input type="hidden" name="overlay_y" id="overlayY" value="{{ job.overlay_y or 10 }}">
       <input type="hidden" name="title_x"   id="titleX"   value="{{ job.title_x or 10 }}">
       <input type="hidden" name="title_y"   id="titleY"   value="{{ job.title_y or 80 }}">
       <input type="hidden" name="sub_y"     id="subY"     value="{{ job.sub_y or 30 }}">
-      <!-- preview dimensions used for coordinate scaling on the server -->
       <input type="hidden" name="preview_w" id="previewW" value="{{ job.preview_w or 0 }}">
       <input type="hidden" name="preview_h" id="previewH" value="{{ job.preview_h or 0 }}">
+      <input type="hidden" id="currentOverlayFile" value="{{ job.overlay or '' }}">
 
       <ul class="nav nav-tabs" id="editorTabs" role="tablist">
         <li class="nav-item">
@@ -93,7 +133,7 @@
         </li>
         <li class="nav-item">
           <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-title" type="button">
-            <i class="bi bi-fonts"></i> Title / Text
+            <i class="bi bi-fonts"></i> Title
           </button>
         </li>
         <li class="nav-item">
@@ -108,26 +148,24 @@
         <!-- ─── OVERLAY TAB ─── -->
         <div class="tab-pane fade show active" id="tab-overlay">
           <div class="mb-3">
-            <label class="form-label">Image file <span class="text-muted">(PNG with transparency recommended)</span></label>
+            <label class="form-label fw-semibold">Logo / Watermark <span class="text-muted fw-normal">(PNG with transparency)</span></label>
             <input type="file" name="overlay" class="form-control" accept="image/*" id="overlayInput">
           </div>
           {% if job.overlay %}
           <div class="mb-2">
-            <small class="text-muted">
-              Overlay <strong>{{ job.overlay }}</strong> loaded – use the live
-              preview canvas above to position it and to see subtitles/other elements.
-            </small>
+            <span class="badge" style="background:var(--accent2);">{{ job.overlay }}</span>
+            <small class="text-muted ms-1">loaded — drag on preview to reposition</small>
           </div>
           {% endif %}
           <div class="row g-2 mb-1">
             <div class="col-5">
-              <label class="form-label">Width (px)</label>
-              <input type="number" name="overlay_w" id="overlayW" class="form-control"
+              <label class="form-label small">Width (px)</label>
+              <input type="number" name="overlay_w" id="overlayW" class="form-control form-control-sm"
                      value="{{ job.overlay_w or '' }}" placeholder="auto" min="10" max="3840">
             </div>
             <div class="col-5">
-              <label class="form-label">Height (px)</label>
-              <input type="number" name="overlay_h" id="overlayH" class="form-control"
+              <label class="form-label small">Height (px)</label>
+              <input type="number" name="overlay_h" id="overlayH" class="form-control form-control-sm"
                      value="{{ job.overlay_h or '' }}" placeholder="auto" min="10" max="3840">
             </div>
             <div class="col-2 d-flex align-items-end pb-1">
@@ -137,152 +175,277 @@
               </div>
             </div>
           </div>
-          <small class="text-muted d-block mt-1">
-            <i class="bi bi-info-circle"></i> Drag the image on the preview canvas to reposition.
-          </small>
         </div>
 
         <!-- ─── TITLE / TEXT TAB ─── -->
         <div class="tab-pane fade" id="tab-title">
           <div class="mb-3">
-            <label class="form-label">Title text</label>
+            <label class="form-label fw-semibold">Title text</label>
             <input type="text" name="title_text" id="titleText" class="form-control"
                    value="{{ job.title_text or '' }}" placeholder="Enter title or leave blank to skip">
           </div>
           <div class="row g-2 mb-2">
-            <div class="col-6">
-              <label class="form-label">Font</label>
-              <select name="title_font" id="titleFont" class="form-select">
+            <div class="col-md-5">
+              <label class="form-label small">Font</label>
+              <select name="title_font" id="titleFont" class="form-select form-select-sm">
                 {% for font in font_list %}
                 <option value="{{ font }}" {% if job.title_font == font %}selected{% endif %}>{{ font }}</option>
                 {% endfor %}
               </select>
             </div>
-            <div class="col-6">
-              <label class="form-label">Size (px)</label>
+            <div class="col-md-3">
+              <label class="form-label small">Size (px)</label>
               <div class="size-row">
                 <input type="range" id="titleSizeRange" min="8" max="200" value="{{ job.title_size or 48 }}">
-                <input type="number" name="title_size" id="titleSize" class="form-control"
+                <input type="number" name="title_size" id="titleSize" class="form-control form-control-sm"
                        value="{{ job.title_size or 48 }}" min="8" max="200">
               </div>
             </div>
-          </div>
-          <div class="row g-2">
-            <div class="col-6">
-              <label class="form-label">Text colour</label>
+            <div class="col-md-2">
+              <label class="form-label small">Color</label>
               <input type="color" name="title_color" id="titleColor"
                      class="form-control form-control-color w-100"
                      value="{{ job.title_color or '#ffffff' }}">
             </div>
-            <div class="col-6">
-              <label class="form-label">Outline colour</label>
+            <div class="col-md-2">
+              <label class="form-label small">Outline</label>
               <input type="color" name="title_stroke_color" id="titleStrokeColor"
                      class="form-control form-control-color w-100"
                      value="{{ job.title_stroke_color or '#000000' }}">
             </div>
           </div>
           <small class="text-muted d-block mt-2">
-            <i class="bi bi-info-circle"></i> Drag the title on the preview canvas to set its position.
+            <i class="bi bi-info-circle"></i> Drag the title on the preview canvas to position it.
           </small>
         </div>
 
         <!-- ─── SUBTITLES TAB ─── -->
         <div class="tab-pane fade" id="tab-subs">
           <div class="row g-2 mb-2">
-            <div class="col-5">
-              <label class="form-label">Font</label>
-              <select name="sub_font" id="subFont" class="form-select">
+            <div class="col-md-4">
+              <label class="form-label small">Font</label>
+              <select name="sub_font" id="subFont" class="form-select form-select-sm">
                 {% for font in font_list %}
                 <option value="{{ font }}" {% if job.sub_font == font %}selected{% endif %}>{{ font }}</option>
                 {% endfor %}
               </select>
             </div>
-            <div class="col-4">
-              <label class="form-label">Size (px)</label>
+            <div class="col-md-3">
+              <label class="form-label small">Size (px)</label>
               <div class="size-row">
                 <input type="range" id="subSizeRange" min="8" max="100" value="{{ job.sub_size or 18 }}">
-                <input type="number" name="sub_size" id="subSize" class="form-control"
+                <input type="number" name="sub_size" id="subSize" class="form-control form-control-sm"
                        value="{{ job.sub_size or 18 }}" min="8" max="100">
               </div>
             </div>
-            <div class="col-3">
-              <label class="form-label">Colour</label>
+            <div class="col-md-2">
+              <label class="form-label small">Color</label>
               <input type="color" name="sub_color" id="subColor"
                      class="form-control form-control-color w-100"
                      value="{{ job.sub_color or '#ffffff' }}">
             </div>
-          </div>
-          <div class="row g-2 mb-2">
-            <div class="col-6">
-              <label class="form-label">Outline colour</label>
-              <input type="color" name="sub_stroke_color" id="subStrokeColor"
-                     class="form-control form-control-color w-100"
-                     value="{{ job.sub_stroke_color or '#000000' }}">
-            </div>
-            <div class="col-6">
-              <label class="form-label">Position (px from bottom)</label>
+            <div class="col-md-3">
+              <label class="form-label small">Pos (from bottom)</label>
               <div class="size-row">
                 <input type="range" id="subYRange" min="0" max="500" value="{{ job.sub_y or 30 }}">
-                <input type="number" name="subYNum" id="subYNum" class="form-control"
+                <input type="number" name="subYNum" id="subYNum" class="form-control form-control-sm"
                        value="{{ job.sub_y or 30 }}" min="0" max="500">
               </div>
             </div>
           </div>
+          <div class="mb-2">
+            <label class="form-label small">Outline color</label>
+            <input type="color" name="sub_stroke_color" id="subStrokeColor"
+                   class="form-control form-control-color"
+                   value="{{ job.sub_stroke_color or '#000000' }}" style="width:60px;">
+          </div>
           <small class="text-muted d-block mb-2">
-            <i class="bi bi-info-circle"></i> Drag the subtitle line on the preview canvas to reposition.
+            <i class="bi bi-info-circle"></i> Drag the subtitle line on preview to reposition.
           </small>
           <div class="mb-1">
-            <label class="form-label">SRT content <small class="text-muted">(edit directly)</small></label>
+            <label class="form-label fw-semibold">SRT Content <small class="text-muted fw-normal">(editable)</small></label>
             <textarea id="srtTextarea" name="srt_text" class="form-control font-monospace"
-                      rows="11" style="font-size:0.78rem;">{{ srt_content }}</textarea>
+                      rows="11" style="font-size:0.76rem; background:#0d1117; color:#c9d1d9;">{{ srt_content }}</textarea>
           </div>
         </div>
 
       </div><!-- /tab-content -->
 
-      <div class="d-flex gap-2">
+      <!-- Action buttons -->
+      <div class="d-flex flex-wrap gap-2 mb-3">
         <button type="submit" name="save" value="1" class="btn btn-secondary" id="saveBtn">
           <i class="bi bi-save"></i> Save Settings
         </button>
         <button type="submit" class="btn btn-primary" id="renderBtn" name="render" value="1">
           <i class="bi bi-film"></i> Render Video
         </button>
-        <a href="/download/{{ job.video }}" class="btn btn-outline-success">
+        <a href="/download/{{ job.video }}" class="btn" style="background:var(--accent2);color:#fff;">
           <i class="bi bi-download"></i> Download
         </a>
       </div>
-      <!-- subtitles/editor and highlight controls moved here -->
-      <div class="mt-3">
-        <label class="form-label">Current subtitle (editable):</label>
-        <div id="subtitleDisplay" class="bg-dark text-white p-1 rounded" contenteditable="true" style="min-height:1.5em;" spellcheck="false"></div>
-        <div class="mt-1 text-end">
-          <button type="button" id="highlightBtn" class="btn btn-sm btn-warning">Highlight Selection</button>
-        </div>
-        <div class="mt-1">
-          <small>Highlights: <span id="highlightList" class="fw-bold"></span></small>
+
+      <!-- Subtitle editor & highlight -->
+      <div class="control-panel">
+        <label class="section-title"><i class="bi bi-pencil-square"></i> Current Subtitle (editable)</label>
+        <div id="subtitleDisplay" class="bg-dark text-white p-2 rounded" contenteditable="true"
+             style="min-height:1.8em; font-size:0.95rem;" spellcheck="false"></div>
+        <div class="d-flex justify-content-between align-items-center mt-2">
+          <button type="button" id="highlightBtn" class="btn btn-sm btn-warning">
+            <i class="bi bi-highlighter"></i> Highlight Selection
+          </button>
+          <small class="text-muted">Highlights: <span id="highlightList" class="fw-bold"></span></small>
         </div>
       </div>
-      <!-- time navigation slider and controls -->
-      <div class="mt-3 d-flex align-items-center gap-2">
-        <button type="button" id="prevSubBtn" class="btn btn-sm btn-outline-secondary" title="Previous subtitle">
-          <i class="bi bi-skip-backward-fill"></i>
-        </button>
-        <button type="button" id="playBtn" class="btn btn-sm btn-outline-secondary" title="Play video">
-          <i class="bi bi-play-fill"></i>
-        </button>
-        <button type="button" id="pauseBtn" class="btn btn-sm btn-outline-secondary" title="Pause video">
-          <i class="bi bi-pause-fill"></i>
-        </button>
-        <button type="button" id="nextSubBtn" class="btn btn-sm btn-outline-secondary" title="Next subtitle">
-          <i class="bi bi-skip-forward-fill"></i>
-        </button>
-        <input type="range" id="timeSlider" min="0" max="0" step="0.01" class="form-range flex-grow-1">
+
+      <!-- Time navigation -->
+      <div class="control-panel">
+        <div class="d-flex align-items-center gap-2">
+          <button type="button" id="prevSubBtn" class="btn btn-sm btn-outline-secondary" title="Previous subtitle">
+            <i class="bi bi-skip-backward-fill"></i>
+          </button>
+          <button type="button" id="playBtn" class="btn btn-sm btn-outline-secondary" title="Play">
+            <i class="bi bi-play-fill"></i>
+          </button>
+          <button type="button" id="pauseBtn" class="btn btn-sm btn-outline-secondary" title="Pause">
+            <i class="bi bi-pause-fill"></i>
+          </button>
+          <button type="button" id="nextSubBtn" class="btn btn-sm btn-outline-secondary" title="Next subtitle">
+            <i class="bi bi-skip-forward-fill"></i>
+          </button>
+          <input type="range" id="timeSlider" min="0" max="0" step="0.01" class="form-range flex-grow-1" style="accent-color:var(--accent);">
+        </div>
       </div>
     </form>
   </div>
 </div>
 
 <script>
+// ═══════════════════════════════════════════════════════════════════════════
+//  TEMPLATE / PRESET SYSTEM
+// ═══════════════════════════════════════════════════════════════════════════
+function collectConfig() {
+  return {
+    title_text:         document.getElementById('titleText').value,
+    title_font:         document.getElementById('titleFont').value,
+    title_size:         document.getElementById('titleSize').value,
+    title_color:        document.getElementById('titleColor').value,
+    title_stroke_color: document.getElementById('titleStrokeColor').value,
+    title_x:            document.getElementById('titleX').value,
+    title_y:            document.getElementById('titleY').value,
+    sub_font:           document.getElementById('subFont').value,
+    sub_size:           document.getElementById('subSize').value,
+    sub_color:          document.getElementById('subColor').value,
+    sub_stroke_color:   document.getElementById('subStrokeColor').value,
+    sub_y:              document.getElementById('subY').value,
+    overlay_x:          document.getElementById('overlayX').value,
+    overlay_y:          document.getElementById('overlayY').value,
+    overlay_w:          document.getElementById('overlayW').value,
+    overlay_h:          document.getElementById('overlayH').value,
+    overlay:            document.getElementById('currentOverlayFile').value,
+  };
+}
+
+function applyConfig(cfg) {
+  const fields = {
+    'titleText':'title_text','titleFont':'title_font','titleSize':'title_size',
+    'titleColor':'title_color','titleStrokeColor':'title_stroke_color',
+    'titleX':'title_x','titleY':'title_y',
+    'subFont':'sub_font','subSize':'sub_size','subColor':'sub_color',
+    'subStrokeColor':'sub_stroke_color','subY':'sub_y',
+    'overlayX':'overlay_x','overlayY':'overlay_y',
+    'overlayW':'overlay_w','overlayH':'overlay_h',
+  };
+  for (const [domId, cfgKey] of Object.entries(fields)) {
+    const el = document.getElementById(domId);
+    if (el && cfg[cfgKey] !== undefined) el.value = cfg[cfgKey];
+  }
+  // update range sliders
+  document.getElementById('titleSizeRange').value = cfg.title_size || 48;
+  document.getElementById('subSizeRange').value = cfg.sub_size || 18;
+  document.getElementById('subYRange').value = cfg.sub_y || 30;
+  document.getElementById('subYNum').value = cfg.sub_y || 30;
+  // update canvas positions
+  titlePos.x = parseInt(cfg.title_x) || 10;
+  titlePos.y = parseInt(cfg.title_y) || 80;
+  overlayPos.x = parseInt(cfg.overlay_x) || 10;
+  overlayPos.y = parseInt(cfg.overlay_y) || 10;
+  subPos.y = parseInt(cfg.sub_y) || 30;
+  // restore overlay image if template includes one
+  if (cfg.overlay) {
+    document.getElementById('currentOverlayFile').value = cfg.overlay;
+    const img = new Image();
+    img.onload = () => {
+      overlayImg = img;
+      overlayAspect = img.naturalWidth / img.naturalHeight;
+      if (!document.getElementById('overlayW').value) document.getElementById('overlayW').value = img.naturalWidth;
+      if (!document.getElementById('overlayH').value) document.getElementById('overlayH').value = img.naturalHeight;
+    };
+    img.src = '/preview/' + cfg.overlay;
+  }
+}
+
+const msgEl = document.getElementById('templateMsg');
+function tplMsg(text, ok) {
+  if (!msgEl) return;
+  msgEl.textContent = text;
+  msgEl.style.color = ok ? 'var(--accent2)' : 'var(--danger)';
+  setTimeout(() => { msgEl.textContent = ''; }, 3000);
+}
+
+// Load template
+document.getElementById('loadTemplateBtn').addEventListener('click', async () => {
+  const sel = document.getElementById('templateSelect');
+  const name = sel.value;
+  if (!name) { tplMsg('Select a template first', false); return; }
+  const r = await fetch('/api/templates/load/' + encodeURIComponent(name));
+  const data = await r.json();
+  if (data.ok) {
+    applyConfig(data.config);
+    tplMsg('Template loaded!', true);
+  } else {
+    tplMsg(data.error || 'Failed to load', false);
+  }
+});
+
+// Save template
+document.getElementById('saveTemplateBtn').addEventListener('click', async () => {
+  const name = prompt('Template name:');
+  if (!name || !name.trim()) return;
+  const config = collectConfig();
+  const r = await fetch('/api/templates/save', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name: name.trim(), config}),
+  });
+  const data = await r.json();
+  if (data.ok) {
+    tplMsg('Saved!', true);
+    // refresh dropdown
+    const sel = document.getElementById('templateSelect');
+    const opt = document.createElement('option');
+    opt.value = name.trim();
+    opt.textContent = name.trim();
+    // avoid duplicates
+    for (let o of sel.options) if (o.value === name.trim()) { sel.value = name.trim(); return; }
+    sel.insertBefore(opt, sel.options[1] || null);
+    sel.value = name.trim();
+  } else {
+    tplMsg('Save failed', false);
+  }
+});
+
+// Delete template
+document.getElementById('deleteTemplateBtn').addEventListener('click', async () => {
+  const sel = document.getElementById('templateSelect');
+  const name = sel.value;
+  if (!name) { tplMsg('Select a template first', false); return; }
+  if (!confirm('Delete template "' + name + '"?')) return;
+  await fetch('/api/templates/delete/' + encodeURIComponent(name), {method:'DELETE'});
+  sel.querySelector('option[value="' + name + '"]')?.remove();
+  sel.value = '';
+  tplMsg('Deleted.', true);
+});
+
 console.log('editor script loaded');
 // attach submit handler so user gets immediate feedback when render is clicked
 const editForm = document.getElementById('editForm');
@@ -439,9 +602,9 @@ function updatePlayPauseIcon() {
   const btn = document.getElementById('playPauseBtn');
   if (!btn) return;
   if (video.paused) {
-    btn.innerHTML = '<i class="bi bi-play-fill"></i>';
+    btn.innerHTML = '<i class="bi bi-play-fill fs-5"></i>';
   } else {
-    btn.innerHTML = '<i class="bi bi-pause-fill"></i>';
+    btn.innerHTML = '<i class="bi bi-pause-fill fs-5"></i>';
   }
 }
 
@@ -530,8 +693,10 @@ function getOvWH() {
 // pre-load existing overlay on page load
 {% if job.overlay %}
 (function () {
+  console.log('[overlay] pre-loading from job:', '{{ job.overlay }}');
   const img = new Image();
-  img.onload = () => {
+  img.onload = function() {
+    console.log('[overlay] loaded, natural size:', img.naturalWidth, 'x', img.naturalHeight);
     overlayImg    = img;
     overlayAspect = img.naturalWidth / img.naturalHeight;
     const wIn = document.getElementById('overlayW');
@@ -539,7 +704,15 @@ function getOvWH() {
     if (!wIn.value) wIn.value = img.naturalWidth;
     if (!hIn.value) hIn.value = img.naturalHeight;
   };
+  img.onerror = function(e) {
+    console.error('[overlay] failed to load /preview/{{ job.overlay }}', e);
+  };
   img.src = '/preview/{{ job.overlay }}';
+  // handle cached image (onload may have fired synchronously before we attached the handler)
+  if (img.complete && img.naturalWidth > 0) {
+    console.log('[overlay] image was cached, firing onload manually');
+    img.onload();
+  }
 }());
 {% endif %}
 
@@ -807,6 +980,8 @@ canvas.addEventListener('mouseleave', () => { dragging = null; });
 document.getElementById('overlayInput').addEventListener('change', e => {
   const file = e.target.files[0];
   if (!file) return;
+  // track the filename so templates can save & restore it
+  document.getElementById('currentOverlayFile').value = file.name;
   const url = URL.createObjectURL(file);
   const img = new Image();
   img.onload = () => {

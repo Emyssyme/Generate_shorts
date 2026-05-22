@@ -1,35 +1,215 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-bs-theme="dark">
 <head>
     <meta charset="utf-8">
-    <title>Generate Shorts</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Shorts Studio</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0d1117;
+            --surface: #161b22;
+            --surface2: #21262d;
+            --border: #30363d;
+            --text: #c9d1d9;
+            --text-muted: #8b949e;
+            --accent: #58a6ff;
+            --accent2: #3fb950;
+            --danger: #f85149;
+        }
+        [data-bs-theme="light"] {
+            --bg: #f6f8fa;
+            --surface: #ffffff;
+            --surface2: #f0f2f5;
+            --border: #d0d7de;
+            --text: #1f2328;
+            --text-muted: #656d76;
+            --accent: #0969da;
+            --accent2: #1a7f37;
+            --danger: #cf222e;
+        }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            min-height: 100vh;
+        }
+        .navbar {
+            background: var(--surface) !important;
+            border-bottom: 1px solid var(--border);
+            backdrop-filter: blur(12px);
+        }
+        .navbar-brand {
+            font-weight: 700;
+            font-size: 1.25rem;
+            letter-spacing: -0.02em;
+            color: var(--accent) !important;
+        }
+        .navbar-brand i { color: var(--accent2); }
+        .nav-link {
+            font-weight: 500;
+            color: var(--text) !important;
+            transition: color .15s;
+        }
+        .nav-link:hover { color: var(--accent) !important; }
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,.12);
+        }
+        .card-header {
+            background: var(--surface2);
+            border-bottom: 1px solid var(--border);
+            border-radius: 12px 12px 0 0 !important;
+        }
+        .btn {
+            font-weight: 500;
+            border-radius: 8px;
+            transition: all .15s;
+        }
+        .btn-primary {
+            background: var(--accent);
+            border-color: var(--accent);
+        }
+        .btn-primary:hover { filter: brightness(1.15); }
+        .form-control, .form-select {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            color: var(--text);
+            border-radius: 8px;
+        }
+        .form-control:focus, .form-select:focus {
+            background: var(--surface2);
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(88,166,255,.15);
+        }
+        .form-control::placeholder { color: var(--text-muted); }
+        .nav-tabs .nav-link {
+            border: none;
+            color: var(--text-muted);
+            font-weight: 500;
+            border-radius: 8px 8px 0 0;
+            padding: 10px 16px;
+        }
+        .nav-tabs .nav-link.active {
+            background: var(--surface);
+            color: var(--accent);
+            border-bottom: 2px solid var(--accent);
+        }
+        .alert {
+            border-radius: 10px;
+            border: 1px solid var(--border);
+        }
+        .badge { font-weight: 500; border-radius: 6px; }
+        pre.log-box {
+            background: #0d1117;
+            color: #c9d1d9;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 0.8rem;
+            max-height: 180px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .template-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 4px 12px;
+            font-size: 0.82rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all .15s;
+        }
+        .template-chip:hover { border-color: var(--accent); background: var(--surface); }
+        .template-chip.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+        .section-title {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+        .theme-toggle {
+            cursor: pointer;
+            background: none;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 4px 10px;
+            color: var(--text-muted);
+            font-size: .9rem;
+            transition: all .15s;
+        }
+        .theme-toggle:hover { color: var(--accent); border-color: var(--accent); }
+    </style>
 </head>
 <body>
-<nav class="navbar navbar-expand-lg navbar-light bg-light">
-  <div class="container-fluid">
-    <a class="navbar-brand" href="{{ url_for('video_cut') }}">Shorts</a>
-    <div class="collapse navbar-collapse">
-      <ul class="navbar-nav ms-auto">
-        {% if current_user.is_authenticated %}
-        <li class="nav-item"><a class="nav-link" href="{{ url_for('list_projects') }}">Projects</a></li>
-        <li class="nav-item"><a class="nav-link" href="{{ url_for('logout') }}">Logout</a></li>
-        {% endif %}
-      </ul>
+<nav class="navbar navbar-expand-lg sticky-top">
+  <div class="container-fluid px-4">
+    <a class="navbar-brand" href="{{ url_for('video_cut') }}">
+      <i class="bi bi-lightning-charge-fill"></i> Shorts Studio
+    </a>
+    <div class="d-flex align-items-center gap-2">
+      {% if current_user.is_authenticated %}
+      <a class="nav-link px-2" href="{{ url_for('video_cut') }}">
+        <i class="bi bi-plus-circle"></i> New Clip
+      </a>
+      <a class="nav-link px-2" href="{{ url_for('list_projects') }}">
+        <i class="bi bi-folder2"></i> Projects
+      </a>
+      <a class="nav-link px-2" href="{{ url_for('logout') }}">
+        <i class="bi bi-box-arrow-right"></i> Logout
+      </a>
+      {% endif %}
+      <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
+        <i class="bi bi-sun-fill" id="themeIcon"></i>
+      </button>
     </div>
   </div>
 </nav>
-<div class="container mt-4">
+<div class="container-fluid px-4 py-4">
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         {% for category, msg in messages %}
-          <div class="alert alert-{{ category }}">{{ msg }}</div>
+          <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+            {{ msg }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+          </div>
         {% endfor %}
       {% endif %}
     {% endwith %}
     {% block content %}{% endblock %}
 </div>
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+function toggleTheme() {
+    const html = document.documentElement;
+    const icon = document.getElementById('themeIcon');
+    if (html.getAttribute('data-bs-theme') === 'dark') {
+        html.setAttribute('data-bs-theme', 'light');
+        icon.className = 'bi bi-moon-fill';
+        localStorage.setItem('theme', 'light');
+    } else {
+        html.setAttribute('data-bs-theme', 'dark');
+        icon.className = 'bi bi-sun-fill';
+        localStorage.setItem('theme', 'dark');
+    }
+}
+(function() {
+    const saved = localStorage.getItem('theme') || 'dark';
+    document.documentElement.setAttribute('data-bs-theme', saved);
+    const icon = document.getElementById('themeIcon');
+    if (icon) icon.className = saved === 'light' ? 'bi bi-moon-fill' : 'bi bi-sun-fill';
+})();
+</script>
 </body>
 </html>

@@ -75,6 +75,8 @@ if not FONT_MAP:
 
 # simple sqlite cache to avoid reprocessing identical url/time ranges
 CACHE_DB = os.path.join(BASE_DIR, "cache.db")
+TEMPLATES_DB = os.path.join(BASE_DIR, "templates.db")
+
 def init_cache():
     conn = sqlite3.connect(CACHE_DB)
     c = conn.cursor()
@@ -99,6 +101,68 @@ def init_cache():
     ''')
     conn.commit()
     conn.close()
+
+def init_templates_db():
+    """Create templates table for storing editor presets."""
+    conn = sqlite3.connect(TEMPLATES_DB)
+    c = conn.cursor()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS templates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            config TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+def get_all_templates():
+    """Return list of template names."""
+    conn = sqlite3.connect(TEMPLATES_DB)
+    c = conn.cursor()
+    c.execute('SELECT name, created_at FROM templates ORDER BY created_at DESC')
+    rows = c.fetchall()
+    conn.close()
+    return [{'name': r[0], 'created_at': r[1]} for r in rows]
+
+def get_template(name):
+    """Return config dict for a named template, or None."""
+    conn = sqlite3.connect(TEMPLATES_DB)
+    c = conn.cursor()
+    c.execute('SELECT config FROM templates WHERE name=?', (name,))
+    row = c.fetchone()
+    conn.close()
+    if row:
+        return json.loads(row[0])
+    return None
+
+def save_template(name, config):
+    """Insert or update a template. Returns True on success."""
+    conn = sqlite3.connect(TEMPLATES_DB)
+    c = conn.cursor()
+    try:
+        c.execute('INSERT OR REPLACE INTO templates (name, config, created_at) VALUES (?, ?, CURRENT_TIMESTAMP)',
+                  (name, json.dumps(config, ensure_ascii=False)))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        conn.close()
+        print(f"save_template error: {e}")
+        return False
+
+def delete_template(name):
+    """Delete a template by name."""
+    conn = sqlite3.connect(TEMPLATES_DB)
+    c = conn.cursor()
+    c.execute('DELETE FROM templates WHERE name=?', (name,))
+    conn.commit()
+    conn.close()
+
+# initialize databases when the module loads
+init_cache()
+init_templates_db()
 
 def find_cache(url, start, end, skip_unsilence=False):
     conn = sqlite3.connect(CACHE_DB)
@@ -126,6 +190,7 @@ def store_cache(url, start, end, video, srt, skip_unsilence=False):
 
 # initialize the cache when the module loads
 init_cache()
+init_templates_db()
 
 # in‑memory job state (persisted to disk)
 JOBS_FILE = os.path.join(BASE_DIR, "jobs.json")
@@ -548,12 +613,16 @@ def preview_file(filename):
     """
     path = os.path.join(DOWNLOADS_DIR, filename)
     if os.path.exists(path) and not is_h264(path):
-        try:
-            new_path = transcode_to_h264(path)
-            filename = os.path.basename(new_path)
-        except Exception as e:
-            # conversion failed; log but fall back to original and hope for the best
-            print(f"preview transcode failed: {e}")
+        # only transcode files that actually contain a video stream —
+        # otherwise we'd corrupt images (overlays) by feeding them to ffmpeg
+        ext = os.path.splitext(path)[1].lower()
+        if ext in ('.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.flv'):
+            try:
+                new_path = transcode_to_h264(path)
+                filename = os.path.basename(new_path)
+            except Exception as e:
+                # conversion failed; log but fall back to original
+                print(f"preview transcode failed: {e}")
     return send_from_directory(DOWNLOADS_DIR, filename, as_attachment=False)
 
 
@@ -602,6 +671,41 @@ def delete_project(job_id):
     else:
         flash(f'Project {job_id} not found', 'warning')
     return redirect(url_for('list_projects'))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Template / Preset API – save & restore editor layer configurations
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/templates', methods=['GET'])
+@login_required
+def api_list_templates():
+    return json.dumps(get_all_templates())
+
+@app.route('/api/templates/save', methods=['POST'])
+@login_required
+def api_save_template():
+    data = request.get_json(force=True)
+    name = (data.get('name') or '').strip()
+    config = data.get('config', {})
+    if not name:
+        return json.dumps({'ok': False, 'error': 'Template name is required'}), 400
+    ok = save_template(name, config)
+    return json.dumps({'ok': ok})
+
+@app.route('/api/templates/load/<name>', methods=['GET'])
+@login_required
+def api_load_template(name):
+    cfg = get_template(name)
+    if cfg is None:
+        return json.dumps({'ok': False, 'error': 'Template not found'}), 404
+    return json.dumps({'ok': True, 'config': cfg})
+
+@app.route('/api/templates/delete/<name>', methods=['DELETE'])
+@login_required
+def api_delete_template(name):
+    delete_template(name)
+    return json.dumps({'ok': True})
 
 
 @app.route('/editor/<job_id>', methods=['GET', 'POST'])
@@ -670,9 +774,6 @@ def editor(job_id):
             'overlay_w': overlay_w,    'overlay_h': overlay_h,
             'preview_w': prev_w, 'preview_h': prev_h,
         })
-        # when saving settings without running ffmpeg we still need to persist
-        save_jobs()
-
         # ── handle overlay upload ─────────────────────────────────────────
         overlay_file = request.files.get('overlay')
         if overlay_file and overlay_file.filename:
@@ -680,6 +781,9 @@ def editor(job_id):
             overlay_file.save(os.path.join(DOWNLOADS_DIR, safe_name))
             job['overlay'] = safe_name
         overlay_filename = job.get('overlay')
+
+        # when saving settings without running ffmpeg we still need to persist
+        save_jobs()
 
         # if the request only wanted to save settings, abort before rendering
         if save_only:
@@ -778,7 +882,10 @@ def editor(job_id):
                 )
                 out_label = '[final]'
             else:
-                fc = f"{ov_scale};[0:v][ov]overlay={overlay_x}:{overlay_y}[vout]"
+                fc = (
+                    f"{ov_scale};"
+                    f"[0:v][ov]overlay={overlay_x}:{overlay_y}[vout]"
+                )
                 out_label = '[vout]'
             with open(fc_script_path, 'w', encoding='utf-8') as _fc:
                 _fc.write(fc)
@@ -803,7 +910,8 @@ def editor(job_id):
                 *VIDEO_QUALITY, '-c:a', 'copy', new_video_name,
             ]
         else:
-            cmd = ['ffmpeg', '-nostdin', '-y', '-i', orig_video, '-c', 'copy', new_video_name]
+            cmd = ['ffmpeg', '-nostdin', '-y', '-i', orig_video,
+                   *VIDEO_QUALITY, '-c:a', 'copy', new_video_name]
 
         update_job(job_id, log=f"ffmpeg: {' '.join(cmd)}")
         result = subprocess.run(cmd, cwd=DOWNLOADS_DIR, capture_output=True, text=True)
@@ -825,7 +933,8 @@ def editor(job_id):
         return redirect(url_for('editor', job_id=job_id))
 
     return render_template('editor.html', job=job, srt_content=srt_text,
-                           job_key=job_id, font_list=list(FONT_MAP.keys()))
+                           job_key=job_id, font_list=list(FONT_MAP.keys()),
+                           templates=get_all_templates())
 
 
 # ---------------------------------------------------------------------------

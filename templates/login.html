@@ -1,19 +1,29 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="container" style="max-width:400px; margin-top:100px;">
-    <div class="card p-4">
-        <h4 class="mb-3">Login</h4>
+<div class="row justify-content-center" style="margin-top:80px;">
+  <div class="col-md-4 col-sm-8">
+    <div class="card">
+      <div class="card-header py-3 text-center">
+        <i class="bi bi-lightning-charge-fill fs-2" style="color:var(--accent2);"></i>
+        <h4 class="mt-2 mb-0 fw-bold">Shorts Studio</h4>
+        <small class="text-muted">Sign in to continue</small>
+      </div>
+      <div class="card-body p-4">
         <form method="post">
             <div class="mb-3">
-                <label class="form-label">Username</label>
-                <input type="text" name="username" class="form-control" required>
+                <label class="form-label fw-semibold">Username</label>
+                <input type="text" name="username" class="form-control" required autofocus>
             </div>
             <div class="mb-3">
-                <label class="form-label">Password</label>
+                <label class="form-label fw-semibold">Password</label>
                 <input type="password" name="password" class="form-control" required>
             </div>
-            <button type="submit" class="btn btn-primary w-100">Sign in</button>
+            <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold">
+              <i class="bi bi-box-arrow-in-right"></i> Sign In
+            </button>
         </form>
+      </div>
     </div>
+  </div>
 </div>
 {% endblock %}

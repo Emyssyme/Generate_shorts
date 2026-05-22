@@ -1,40 +1,76 @@
 {% extends "base.html" %}
 {% block content %}
-<h4>Projects</h4>
-<p class="mb-3">Manage existing jobs (projects). You can edit or delete them.</p>
-<table class="table table-sm">
-  <thead>
-    <tr>
-      <th>ID</th>
-      <th>Status</th>
-      <th>Video</th>
-      <th>SRT</th>
-      <th>Actions</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for jid, job in jobs.items() %}
-    <tr>
-      <td>{{ jid }}</td>
-      <td>{{ job.status }}</td>
-      <td>
-        {% if job.video %}
-          <a href="/download/{{ job.video }}" target="_blank">{{ job.video }}</a>
-        {% endif %}
-      </td>
-      <td>
-        {% if job.srt %}
-          <a href="/download/{{ job.srt }}" target="_blank">{{ job.srt }}</a>
-        {% endif %}
-      </td>
-      <td>
-        <a href="{{ url_for('editor', job_id=jid) }}" class="btn btn-sm btn-outline-primary me-1">Edit</a>
-        <form method="post" action="{{ url_for('delete_project', job_id=jid) }}" style="display:inline;">
-          <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Delete project {{ jid }}?');">Delete</button>
-        </form>
-      </td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h4 class="fw-bold mb-1"><i class="bi bi-folder2"></i> Projects</h4>
+    <small class="text-muted">{{ jobs|length }} project(s)</small>
+  </div>
+  <a href="{{ url_for('video_cut') }}" class="btn btn-primary">
+    <i class="bi bi-plus-circle"></i> New Clip
+  </a>
+</div>
+
+{% if jobs %}
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-borderless mb-0">
+      <thead>
+        <tr style="border-bottom:1px solid var(--border);">
+          <th style="color:var(--text-muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;">ID</th>
+          <th style="color:var(--text-muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;">Status</th>
+          <th style="color:var(--text-muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;">Video</th>
+          <th style="color:var(--text-muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;">SRT</th>
+          <th style="color:var(--text-muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for jid, job in jobs.items() %}
+        <tr style="border-bottom:1px solid var(--border);">
+          <td><code style="font-size:.85rem;">{{ jid }}</code></td>
+          <td>
+            {% if job.status == 'completed' %}
+              <span class="badge" style="background:var(--accent2);">Done</span>
+            {% elif job.status == 'error' %}
+              <span class="badge" style="background:var(--danger);">Error</span>
+            {% else %}
+              <span class="badge" style="background:var(--accent);">{{ job.status }}</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if job.video %}
+              <a href="/download/{{ job.video }}" class="small" target="_blank">{{ job.video }}</a>
+            {% else %}<span class="text-muted">—</span>{% endif %}
+          </td>
+          <td>
+            {% if job.srt %}
+              <a href="/download/{{ job.srt }}" class="small" target="_blank">{{ job.srt }}</a>
+            {% else %}<span class="text-muted">—</span>{% endif %}
+          </td>
+          <td>
+            <div class="d-flex gap-1">
+              <a href="{{ url_for('editor', job_id=jid) }}" class="btn btn-sm btn-outline-secondary">
+                <i class="bi bi-pencil"></i>
+              </a>
+              <form method="post" action="{{ url_for('delete_project', job_id=jid) }}" style="display:inline;">
+                <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Delete {{ jid }}?');">
+                  <i class="bi bi-trash"></i>
+                </button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="empty-state">
+  <i class="bi bi-inbox"></i>
+  <p class="mt-2">No projects yet. Create one by processing a video clip.</p>
+  <a href="{{ url_for('video_cut') }}" class="btn btn-primary mt-2">
+    <i class="bi bi-plus-circle"></i> New Clip
+  </a>
+</div>
+{% endif %}
 {% endblock %}
