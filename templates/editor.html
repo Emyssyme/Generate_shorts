@@ -123,7 +123,7 @@
       <input type="hidden" name="sub_y"     id="subY"     value="{{ job.sub_y or 30 }}">
       <input type="hidden" name="preview_w" id="previewW" value="{{ job.preview_w or 0 }}">
       <input type="hidden" name="preview_h" id="previewH" value="{{ job.preview_h or 0 }}">
-      <input type="hidden" id="currentOverlayFile" value="{{ job.overlay or '' }}">
+      <input type="hidden" name="current_overlay_file" id="currentOverlayFile" value="{{ job.overlay or '' }}">
 
       <ul class="nav nav-tabs" id="editorTabs" role="tablist">
         <li class="nav-item">
@@ -720,16 +720,23 @@ function getOvWH() {
 ['loadedmetadata','loadeddata','canplay','play','pause','error'].forEach(evt => {
   video.addEventListener(evt, e => console.log('video event', evt, e));
 });
-// loadedmetadata → dimensions known (readyState 1) — resize canvas
+// loadedmetadata → dimensions known (readyState 1) — start drawing immediately
+// so the preview never shows a blank frame while waiting for data
 video.addEventListener('loadedmetadata', () => {
   console.log('loadedmetadata', video.videoWidth, video.videoHeight);
   canvas.width  = video.videoWidth  || 540;
   canvas.height = video.videoHeight || 960;
   document.getElementById('previewW').value = video.videoWidth;
   document.getElementById('previewH').value = video.videoHeight;
-  // initialize time slider max
+  canvasReady = true;  // start drawing immediately, don't wait for loadeddata
   const slider = document.getElementById('timeSlider');
   if (slider) slider.max = video.duration || 0;
+  // autoplay muted first so the browser allows it, then unmute for audio
+  video.muted = true;
+  video.play().then(() => {
+    // after playback starts successfully, unmute audio after a short delay
+    setTimeout(() => { video.muted = false; }, 600);
+  }).catch(err => console.log('play promise rejected', err));
 });
 // loadeddata → first frame decoded (readyState >= 2) — safe to drawImage
 video.addEventListener('loadeddata', () => {
@@ -737,15 +744,17 @@ video.addEventListener('loadeddata', () => {
   canvas.width  = video.videoWidth  || canvas.width;
   canvas.height = video.videoHeight || canvas.height;
   canvasReady   = true;
-  video.muted = true;         // most browsers only autoplay muted videos
-  video.play().catch(err => console.log('play promise rejected', err));
 });
 // Also mark ready when the browser can start playing
 video.addEventListener('canplay', () => {
   console.log('canplay');
   canvasReady = true;
-  video.muted = true;
-  video.play().catch(err => console.log('play promise rejected', err));
+  if (video.paused) {
+    video.muted = true;
+    video.play().then(() => {
+      setTimeout(() => { video.muted = false; }, 600);
+    }).catch(err => console.log('play promise rejected', err));
+  }
 });
 
 // time slider update and seek

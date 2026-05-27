@@ -334,6 +334,8 @@ def transcode_to_h264(src_path: str) -> str:
     subprocess.run([
         'ffmpeg', '-nostdin', '-y', '-i', src_path,
         '-c:v', 'libx264', '-crf', '18', '-preset', 'fast',
+        '-g', '30', '-keyint_min', '30', '-sc_threshold', '0',
+        '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
         '-c:a', 'copy', dst_path
     ], check=True)
     return dst_path
@@ -428,6 +430,8 @@ def run_crop(input_video, output_dir, overlay=None):
         subprocess.run([
             'ffmpeg', '-nostdin', '-y', '-i', cropped,
             '-c:v', 'libx264', '-crf', '18', '-preset', 'fast',
+            '-g', '30', '-keyint_min', '30', '-sc_threshold', '0',
+            '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
             '-c:a', 'copy', trans
         ], check=True)
         return trans
@@ -461,6 +465,19 @@ def run_subtitles(input_video, output_dir, model="large", max_length=22, job_id=
     base = os.path.splitext(os.path.basename(input_video))[0]
     return os.path.join(output_dir, base + ".srt")
 
+# 1. Adaugă această mică funcție helper undeva sus în app.py sau chiar deasupra pipeline-ului 
+# pentru a converti orice format de timp (secunde float, "MM:SS" sau "HH:MM:SS") în secunde pure.
+def _time_to_seconds(t_val):
+    if isinstance(t_val, (int, float)):
+        return float(t_val)
+    t_str = str(t_val).strip()
+    if ':' in t_str:
+        parts = t_str.split(':')
+        if len(parts) == 2:  # MM:SS
+            return int(parts[0]) * 60 + float(parts[1])
+        elif len(parts) == 3:  # HH:MM:SS
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+    return float(t_str)
 
 def background_pipeline(job_id, url=None, upload_path=None, start_time="0", end_time=None, skip_unsilence=False):
     """Background thread that cuts/downloads then optionally unsilences, crops, subtitles.
@@ -498,10 +515,27 @@ def background_pipeline(job_id, url=None, upload_path=None, start_time="0", end_
         else:
             update_job(job_id, status="cutting", log=f"trimming {upload_path}")
             # trim local file
-            ff = ["ffmpeg", "-y", "-i", upload_path, "-ss", start_time]
+            start_sec = _time_to_seconds(start_time)
+    
+            # Pornim comanda cu -ss ÎNAINTE de -i pentru căutare ultra-rapidă în fișiere mari
+            ff = ["ffmpeg", "-y", "-ss", f"{start_sec:.3f}", "-i", upload_path]
+            
             if end_time:
-                ff += ["-to", end_time]
-            ff += ["-c", "copy", cut_path]
+                end_sec = _time_to_seconds(end_time)
+                duration = end_sec - start_sec
+                if duration > 0:
+                    # Folosim -t (durata) în loc de -to, deoarece axa timpului s-a resetat prin mutarea lui -ss
+                    ff += ["-t", f"{duration:.3f}"]
+
+            # Înlocuim "-c", "copy" cu re-encodare rapidă și curățare de timestamp-uri
+            ff += [
+                "-c:v", "libx264",        # Codec video compatibil oriunde
+                "-c:a", "aac",            # Codec audio standard
+                "-preset", "fast",        # Randare rapidă
+                "-crf", "22",             # Calitate vizuală excelentă
+                "-avoid_negative_ts", "make_zero", # Resetează indicii de timp la 0 (rezolvă freeze-ul pe TikTok/VLC)
+                cut_path
+            ]
             subprocess.run(ff, check=True)
 
         if skip_unsilence:
@@ -632,8 +666,13 @@ def preview_file(filename):
 # These settings will increase file size but give the best possible output
 # from libx264.  You can always override by editing this constant or adding a
 # UI control later.
+#
+# -g 30 / -keyint_min 30 force a keyframe every ~1 second so the video
+# starts playing immediately instead of freezing for several seconds while
+# the decoder waits for the next GOP boundary.
 VIDEO_QUALITY = [
     '-c:v', 'libx264', '-crf', '14', '-preset', 'veryslow',
+    '-g', '30', '-keyint_min', '30', '-sc_threshold', '0',
     '-pix_fmt', 'yuv420p', '-movflags', '+faststart'
 ]
 
@@ -780,6 +819,13 @@ def editor(job_id):
             safe_name = os.path.basename(overlay_file.filename)
             overlay_file.save(os.path.join(DOWNLOADS_DIR, safe_name))
             job['overlay'] = safe_name
+        # If no new file was uploaded but the hidden form field carries an
+        # overlay filename (e.g. restored from a template), link it to the
+        # job so render uses it — provided the file actually exists on disk.
+        if not job.get('overlay'):
+            ov_from_field = request.form.get('current_overlay_file', '').strip()
+            if ov_from_field and os.path.exists(os.path.join(DOWNLOADS_DIR, ov_from_field)):
+                job['overlay'] = ov_from_field
         overlay_filename = job.get('overlay')
 
         # when saving settings without running ffmpeg we still need to persist
