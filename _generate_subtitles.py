@@ -25,11 +25,11 @@ def format_ass_timestamp(seconds):
 def generate_ass_karaoke(segments, ass_path, max_length):
     """Generate an ASS file with per-word background-highlight rectangles.
 
-    Instead of relying on ASS karaoke tags, we generate individual Dialogue
-    events for each word transition.  The highlighted word gets a coloured
-    rectangle behind it via ``\\3c`` (outline-as-background) + ``\\bord``
-    (large border), with ``\\1c`` setting the foreground text colour.
-    Non-highlighted words use the style's default PrimaryColour.
+    Word timing is computed **proportionally** within each segment (same
+    logic as the canvas preview) so the rendered video matches what the
+    user sees in the editor.  This approach completely avoids the
+    overlapping-timestamp problems that Whisper's word-level timestamps
+    produce when speech is fast.
 
     Placeholders ``##HLBG##``, ``##HLFG##``, ``##BORD##`` are replaced at
     render time with the user's chosen colours from the editor UI.
@@ -50,56 +50,41 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     lines = [header]
 
-    for seg_idx, seg in enumerate(segments):
-        words_data = seg.get("words", [])
+    for seg in segments:
         text = seg.get("text", "").strip()
-
-        # If no word-level timestamps, fall back to a single event
-        if not words_data:
-            start = format_ass_timestamp(seg["start"])
-            end = format_ass_timestamp(seg["end"])
-            clean_text = _clean_text(text)
-            lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{clean_text}")
-            continue
-
         seg_start = seg["start"]
         seg_end = seg["end"]
+        seg_duration = seg_end - seg_start
 
-        # Collect words with their start times
-        word_entries = []
-        for w in words_data:
-            wt = w.get("word", "").strip()
-            if not wt:
-                continue
-            ws = w.get("start", seg_start)
-            word_entries.append((wt, ws))
+        if seg_duration <= 0:
+            continue
 
-        if not word_entries:
+        # Split the segment text into words (same logic as canvas preview)
+        words = text.split()
+        if not words:
             start = format_ass_timestamp(seg_start)
             end = format_ass_timestamp(seg_end)
             lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{_clean_text(text)}")
             continue
 
-        # For each word position (0..n-1), create an event where that word
-        # is highlighted.  The event starts when the word begins and ends
-        # when the next word begins (or at segment end for the last word).
-        for wi, (word_text, w_start) in enumerate(word_entries):
-            # Determine when this highlight ends
-            if wi < len(word_entries) - 1:
-                highlight_end = word_entries[wi + 1][1]  # next word's start
-            else:
-                highlight_end = seg_end
+        word_count = len(words)
+        word_duration = seg_duration / word_count
 
-            # Build the full line with background-highlight on the current word.
-            # The highlighted word gets a coloured rectangle behind it using
-            # \\3c (outline colour) + \\bord (large border) = filled background,
-            # plus \\1c to set the text colour on top of the background.
-            # Placeholders (replaced at render time by app.py):
-            #   ##HLBG## → highlight background colour (e.g. yellow)
-            #   ##HLFG## → text colour on highlight background (e.g. black)
-            #   ##BORD## → border/background thickness in pixels
+        # For each word position, create a Dialogue event where that word
+        # is highlighted.  Timing is proportional — word i occupies
+        # [seg_start + i*dur, seg_start + (i+1)*dur], matching the
+        # canvas preview exactly.
+        for wi, current_word in enumerate(words):
+            ev_start = seg_start + wi * word_duration
+            ev_end = seg_start + (wi + 1) * word_duration
+
+            if ev_end - ev_start < 0.02:
+                continue
+
+            # Build the line: highlighted word gets background box via
+            # \\3c + \\bord, others are plain text.
             parts = []
-            for wj, (w_text, _) in enumerate(word_entries):
+            for wj, w_text in enumerate(words):
                 if wj == wi:
                     parts.append(
                         f"{{\\3c&H##HLBG##&\\bord##BORD##\\1c&H##HLFG##&}}"
@@ -110,14 +95,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     parts.append(w_text)
 
             full_text = " ".join(parts)
-
-            start_ts = format_ass_timestamp(w_start)
-            end_ts = format_ass_timestamp(min(highlight_end, seg_end))
-
-            # Small gap between consecutive events to avoid flicker
-            if highlight_end - w_start < 0.02:
-                continue
-
+            start_ts = format_ass_timestamp(ev_start)
+            end_ts = format_ass_timestamp(ev_end)
             lines.append(f"Dialogue: 0,{start_ts},{end_ts},Default,,0,0,0,,{full_text}")
 
     content = "\n".join(lines) + "\n"

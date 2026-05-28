@@ -347,6 +347,104 @@ def transcode_to_h264(src_path: str) -> str:
     return dst_path
 
 
+def srt_to_ass(srt_content: str, ass_path: str):
+    """Convert SRT content to an ASS file with per-word karaoke highlighting.
+
+    Word timing is computed **proportionally** within each SRT entry so
+    the rendered video matches the canvas preview exactly.  Each entry
+    is split into words, and each word gets its own Dialogue event with
+    ``##HLBG##`` / ``##HLFG##`` / ``##BORD##`` placeholders that are
+    replaced at render time with the user's chosen colours.
+
+    This function is called whenever the user edits the SRT by hand.
+    """
+    header = """[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+WrapStyle: 2
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,48,&H0000FFFF,&H00FFFFFF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,2,0,2,10,10,0,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+
+    def _to_sec(ts):
+        """Convert HH:MM:SS.mmm or HH:MM:SS,mmm to seconds."""
+        ts = ts.replace(',', '.')
+        h, m, s = ts.split(':')
+        return int(h) * 3600 + int(m) * 60 + float(s)
+
+    def _ass_ts(sec):
+        """Convert seconds to ASS timestamp H:MM:SS.cc."""
+        total = int(sec)
+        h, rem = divmod(total, 3600)
+        m, s = divmod(rem, 60)
+        cs = int((sec - total) * 100)
+        return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
+
+    blocks = re.split(r"\n\s*\n", srt_content.strip())
+    lines_out = [header]
+
+    for block in blocks:
+        block = block.strip()
+        if not block:
+            continue
+        parts = block.split("\n")
+        if len(parts) < 3:
+            continue
+        ts_match = re.match(
+            r"(\d{2}:\d{2}:\d{2}[,.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,.]\d{3})",
+            parts[1])
+        if not ts_match:
+            continue
+        seg_start = _to_sec(ts_match.group(1))
+        seg_end = _to_sec(ts_match.group(2))
+        seg_duration = seg_end - seg_start
+        if seg_duration <= 0:
+            continue
+
+        # Join all text lines, split into words
+        full_text = " ".join(parts[2:])
+        full_text = re.sub(r"\s+", " ", full_text).strip()
+        if not full_text:
+            continue
+        words = full_text.split()
+        word_count = len(words)
+        word_duration = seg_duration / word_count
+
+        # Generate one Dialogue event per word with proportional timing
+        for wi, current_word in enumerate(words):
+            ev_start = seg_start + wi * word_duration
+            ev_end = seg_start + (wi + 1) * word_duration
+            if ev_end - ev_start < 0.02:
+                continue
+
+            # Build the line with highlight on the current word
+            word_parts = []
+            for wj, w_text in enumerate(words):
+                if wj == wi:
+                    word_parts.append(
+                        f"{{\\3c&H##HLBG##&\\bord##BORD##\\1c&H##HLFG##&}}"
+                        f"{w_text}"
+                        f"{{\\r}}"
+                    )
+                else:
+                    word_parts.append(w_text)
+
+            line_text = " ".join(word_parts)
+            lines_out.append(
+                f"Dialogue: 0,{_ass_ts(ev_start)},{_ass_ts(ev_end)},"
+                f"Default,,0,0,0,,{line_text}")
+
+    content = "\n".join(lines_out) + "\n"
+    with open(ass_path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(content)
+
+
 def find_script(name):
     """Locate a helper script by name in the current directory or its parent.
 
@@ -918,6 +1016,21 @@ def editor(job_id):
                 f.write(new_srt)
         srt_text = new_srt
 
+        # ── regenerate ASS from edited SRT ───────────────────────────────
+        # The original ASS had per-word karaoke timestamps from Whisper.
+        # After the user edits the SRT those timestamps no longer match,
+        # so we rebuild a clean ASS directly from the SRT content.
+        # The new ASS has one Dialogue event per SRT entry (no karaoke)
+        # but inherits all styling via force_style at render time.
+        if new_srt:
+            new_ass_name = os.path.splitext(job.get('srt', ''))[0] + '.ass'
+            try:
+                srt_to_ass(new_srt, os.path.join(DOWNLOADS_DIR, new_ass_name))
+                job['ass'] = new_ass_name
+            except Exception as e:
+                update_job(job_id, log=f"warning: could not rebuild ASS from SRT: {e}")
+                job.pop('ass', None)
+
         # ── collect all styling fields ────────────────────────────────────
         title_text   = request.form.get('title_text', '').strip()
         title_font   = request.form.get('title_font', 'Arial')
@@ -929,9 +1042,15 @@ def editor(job_id):
         sub_font     = request.form.get('sub_font', 'Arial')
         sub_color    = request.form.get('sub_color', '#ffffff')
         sub_highlight_color = request.form.get('sub_highlight_color', '#ffff00')
+        sub_highlight_text_color = request.form.get('sub_highlight_text_color', '#000000')
         sub_stroke   = request.form.get('sub_stroke_color', '#000000')
         sub_size     = request.form.get('sub_size', '18')
         sub_y        = request.form.get('sub_y', job.get('sub_y', '30'))
+        sub_outline_w = request.form.get('sub_outline_w', '2')
+        sub_hl_box    = request.form.get('sub_hl_box', '16')
+        sub_bg_enabled = request.form.get('sub_bg_enabled') == '1'
+        sub_bg_color = request.form.get('sub_bg_color', '#000000')
+        sub_bg_opacity = request.form.get('sub_bg_opacity', '60')
         overlay_x    = request.form.get('overlay_x', job.get('overlay_x', '10'))
         overlay_y    = request.form.get('overlay_y', job.get('overlay_y', '10'))
         overlay_w    = request.form.get('overlay_w', job.get('overlay_w', '150'))
@@ -946,7 +1065,13 @@ def editor(job_id):
             'title_size': title_size,   'title_x': title_x, 'title_y': title_y,
             'sub_font': sub_font,       'sub_color': sub_color,
             'sub_highlight_color': sub_highlight_color,
+            'sub_highlight_text_color': sub_highlight_text_color,
             'sub_stroke_color': sub_stroke, 'sub_size': sub_size, 'sub_y': sub_y,
+            'sub_outline_w': sub_outline_w,
+            'sub_hl_box': sub_hl_box,
+            'sub_bg_enabled': sub_bg_enabled,
+            'sub_bg_color': sub_bg_color,
+            'sub_bg_opacity': sub_bg_opacity,
             'overlay_x': overlay_x,    'overlay_y': overlay_y,
             'overlay_w': overlay_w,    'overlay_h': overlay_h,
             'preview_w': prev_w, 'preview_h': prev_h,
@@ -1017,19 +1142,23 @@ def editor(job_id):
 
         if has_srt:
             # Use ASS file for word-level background-highlight when available
-            ass_path = os.path.join(DOWNLOADS_DIR, job.get('ass', ''))
-            use_karaoke = os.path.exists(ass_path)
+            ass_name = job.get('ass', '')
+            ass_path = os.path.join(DOWNLOADS_DIR, ass_name) if ass_name else ''
+            use_karaoke = bool(ass_name) and os.path.isfile(ass_path)
 
             if use_karaoke:
                 sub_highlight = job.get('sub_highlight_color', '#ffff00')
+                sub_highlight_text = job.get('sub_highlight_text_color', '#000000')
                 # Convert HTML colours to ASS BBGGRR format for \\3c/\\1c tags.
                 # html_to_ass_color returns &H00BBGGRR — we strip the &H00 prefix
                 # and trailing & to get the 6-char BBGGRR used in override tags.
                 ass_hl_full = html_to_ass_color(sub_highlight)
                 hl_hex = ass_hl_full[4:10]  # BBGGRR for highlight background
-                # Text on highlight bg: black for maximum contrast
-                hl_fg = '000000'
-                border_px = str(max(8, int(sub_size) // 3))
+                # Text on highlight background – user-chosen colour
+                ass_hl_text_full = html_to_ass_color(sub_highlight_text)
+                hl_fg = ass_hl_text_full[4:10]
+                # Use user-controlled highlight box thickness instead of computed
+                border_px = sub_hl_box
 
                 with open(ass_path, 'r', encoding='utf-8') as _af:
                     ass_content = _af.read()
@@ -1041,22 +1170,50 @@ def editor(job_id):
                 with open(patched_ass, 'w', encoding='utf-8', newline='\n') as _af:
                     _af.write(ass_content)
                 ass_abs = patched_ass.replace('\\', '/').replace(':', '\\:')
-                sub_style = (
-                    f"FontName={sub_font},FontSize={sub_size},"
-                    f"PrimaryColour={html_to_ass_color(sub_color)},"
-                    f"OutlineColour={html_to_ass_color(sub_stroke)},"
-                    f"Outline=2,Alignment=2,MarginV={sub_y}"
-                )
+
+                # Build ASS style: BorderStyle=3 gives an opaque background box;
+                # BorderStyle=1 is the default outline-only mode.
+                if sub_bg_enabled:
+                    # Convert CSS opacity (0-100) to ASS alpha (00=opaque, FF=transparent)
+                    ass_alpha = format(int(255 * (1 - int(sub_bg_opacity) / 100)), '02X')
+                    bg_ass = f"&H{ass_alpha}" + html_to_ass_color(sub_bg_color)[3:]  # strip &H00, prepend alpha
+                    sub_style = (
+                        f"FontName={sub_font},FontSize={sub_size},"
+                        f"PrimaryColour={html_to_ass_color(sub_color)},"
+                        f"OutlineColour={html_to_ass_color(sub_stroke)},"
+                        f"BackColour={bg_ass},"
+                        f"BorderStyle=3,Outline={sub_outline_w},Shadow=1,"
+                        f"Alignment=2,MarginV={sub_y}"
+                    )
+                else:
+                    sub_style = (
+                        f"FontName={sub_font},FontSize={sub_size},"
+                        f"PrimaryColour={html_to_ass_color(sub_color)},"
+                        f"OutlineColour={html_to_ass_color(sub_stroke)},"
+                        f"Outline={sub_outline_w},Alignment=2,MarginV={sub_y}"
+                    )
                 vf_parts.append(f"subtitles='{ass_abs}':force_style='{sub_style}'")
             else:
                 # Fall back to plain SRT when no ASS file exists
                 srt_abs = srt_path.replace('\\', '/').replace(':', '\\:')
-                sub_style = (
-                    f"FontName={sub_font},FontSize={sub_size},"
-                    f"PrimaryColour={html_to_ass_color(sub_color)},"
-                    f"OutlineColour={html_to_ass_color(sub_stroke)},"
-                    f"Outline=2,Alignment=2,MarginV={sub_y}"
-                )
+                if sub_bg_enabled:
+                    ass_alpha = format(int(255 * (1 - int(sub_bg_opacity) / 100)), '02X')
+                    bg_ass = f"&H{ass_alpha}" + html_to_ass_color(sub_bg_color)[3:]
+                    sub_style = (
+                        f"FontName={sub_font},FontSize={sub_size},"
+                        f"PrimaryColour={html_to_ass_color(sub_color)},"
+                        f"OutlineColour={html_to_ass_color(sub_stroke)},"
+                        f"BackColour={bg_ass},"
+                        f"BorderStyle=3,Outline={sub_outline_w},Shadow=1,"
+                        f"Alignment=2,MarginV={sub_y}"
+                    )
+                else:
+                    sub_style = (
+                        f"FontName={sub_font},FontSize={sub_size},"
+                        f"PrimaryColour={html_to_ass_color(sub_color)},"
+                        f"OutlineColour={html_to_ass_color(sub_stroke)},"
+                        f"Outline={sub_outline_w},Alignment=2,MarginV={sub_y}"
+                    )
                 vf_parts.append(f"subtitles='{srt_abs}':force_style='{sub_style}'")
 
         if has_title:

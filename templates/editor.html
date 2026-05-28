@@ -245,25 +245,59 @@
                      value="{{ job.sub_color or '#ffffff' }}">
             </div>
             <div class="col-md-2">
-              <label class="form-label small">Highlight</label>
+              <label class="form-label small">HL BG</label>
               <input type="color" name="sub_highlight_color" id="subHighlightColor"
                      class="form-control form-control-color w-100"
                      value="{{ job.sub_highlight_color or '#ffff00' }}">
             </div>
-            <div class="col-md-3">
-              <label class="form-label small">Pos (from bottom)</label>
-              <div class="size-row">
-                <input type="range" id="subYRange" min="0" max="500" value="{{ job.sub_y or 30 }}">
-                <input type="number" name="subYNum" id="subYNum" class="form-control form-control-sm"
-                       value="{{ job.sub_y or 30 }}" min="0" max="500">
-              </div>
+            <div class="col-md-2">
+              <label class="form-label small">HL text</label>
+              <input type="color" name="sub_highlight_text_color" id="subHighlightTextColor"
+                     class="form-control form-control-color w-100"
+                     value="{{ job.sub_highlight_text_color or '#000000' }}">
+            </div>
+            <div class="col-md-1">
+              <label class="form-label small">Pos</label>
+              <input type="number" name="subYNum" id="subYNum" class="form-control form-control-sm"
+                     value="{{ job.sub_y or 30 }}" min="0" max="500">
             </div>
           </div>
-          <div class="mb-2">
-            <label class="form-label small">Outline color</label>
-            <input type="color" name="sub_stroke_color" id="subStrokeColor"
-                   class="form-control form-control-color"
-                   value="{{ job.sub_stroke_color or '#000000' }}" style="width:60px;">
+          <!-- Outline & Background row -->
+          <div class="row g-2 mb-2 align-items-end">
+            <div class="col-md-3">
+              <label class="form-label small">Outline color</label>
+              <input type="color" name="sub_stroke_color" id="subStrokeColor"
+                     class="form-control form-control-color w-100"
+                     value="{{ job.sub_stroke_color or '#000000' }}">
+            </div>
+            <div class="col-md-2">
+              <label class="form-label small">Outline px</label>
+              <input type="number" name="sub_outline_w" id="subOutlineW" class="form-control form-control-sm"
+                     value="{{ job.sub_outline_w or 2 }}" min="0" max="20" step="0.5">
+            </div>
+            <div class="col-md-2">
+              <div class="form-check mt-3">
+                <input type="checkbox" class="form-check-input" name="sub_bg_enabled" id="subBgEnabled"
+                       value="1" {% if job.sub_bg_enabled %}checked{% endif %}>
+                <label class="form-check-label small" for="subBgEnabled">Background</label>
+              </div>
+            </div>
+            <div class="col-md-2">
+              <label class="form-label small">HL box px</label>
+              <input type="number" name="sub_hl_box" id="subHlBox" class="form-control form-control-sm"
+                     value="{{ job.sub_hl_box or 16 }}" min="2" max="60" step="0.5">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label small">BG color</label>
+              <input type="color" name="sub_bg_color" id="subBgColor"
+                     class="form-control form-control-color w-100"
+                     value="{{ job.sub_bg_color or '#000000' }}">
+            </div>
+            <div class="col-md-2">
+              <label class="form-label small">BG opacity%</label>
+              <input type="number" name="sub_bg_opacity" id="subBgOpacity" class="form-control form-control-sm"
+                     value="{{ job.sub_bg_opacity or 60 }}" min="0" max="100">
+            </div>
           </div>
           <small class="text-muted d-block mb-2">
             <i class="bi bi-info-circle"></i> Drag the subtitle line on preview to reposition.
@@ -341,8 +375,14 @@ function collectConfig() {
     sub_font:           document.getElementById('subFont').value,
     sub_size:           document.getElementById('subSize').value,
     sub_color:          document.getElementById('subColor').value,
-    sub_highlight_color: document.getElementById('subHighlightColor').value,
-    sub_stroke_color:   document.getElementById('subStrokeColor').value,
+    sub_highlight_color:       document.getElementById('subHighlightColor').value,
+    sub_highlight_text_color:  document.getElementById('subHighlightTextColor').value,
+    sub_stroke_color:           document.getElementById('subStrokeColor').value,
+    sub_outline_w:              document.getElementById('subOutlineW').value,
+    sub_hl_box:                 document.getElementById('subHlBox').value,
+    sub_bg_enabled:     document.getElementById('subBgEnabled').checked ? '1' : '',
+    sub_bg_color:       document.getElementById('subBgColor').value,
+    sub_bg_opacity:     document.getElementById('subBgOpacity').value,
     sub_y:              document.getElementById('subY').value,
     overlay_x:          document.getElementById('overlayX').value,
     overlay_y:          document.getElementById('overlayY').value,
@@ -359,7 +399,11 @@ function applyConfig(cfg) {
     'titleX':'title_x','titleY':'title_y',
     'subFont':'sub_font','subSize':'sub_size','subColor':'sub_color',
     'subHighlightColor':'sub_highlight_color',
-    'subStrokeColor':'sub_stroke_color','subY':'sub_y',
+    'subHighlightTextColor':'sub_highlight_text_color',
+    'subStrokeColor':'sub_stroke_color','subOutlineW':'sub_outline_w',
+    'subHlBox':'sub_hl_box',
+    'subBgEnabled':'sub_bg_enabled','subBgColor':'sub_bg_color',
+    'subBgOpacity':'sub_bg_opacity','subY':'sub_y',
     'overlayX':'overlay_x','overlayY':'overlay_y',
     'overlayW':'overlay_w','overlayH':'overlay_h',
   };
@@ -370,8 +414,14 @@ function applyConfig(cfg) {
   // update range sliders
   document.getElementById('titleSizeRange').value = cfg.title_size || 48;
   document.getElementById('subSizeRange').value = cfg.sub_size || 18;
-  document.getElementById('subYRange').value = cfg.sub_y || 30;
   document.getElementById('subYNum').value = cfg.sub_y || 30;
+  // restore highlight / outline / background fields
+  document.getElementById('subHighlightTextColor').value = cfg.sub_highlight_text_color || '#000000';
+  document.getElementById('subOutlineW').value = cfg.sub_outline_w || 2;
+  document.getElementById('subHlBox').value = cfg.sub_hl_box || 16;
+  document.getElementById('subBgEnabled').checked = cfg.sub_bg_enabled === '1';
+  document.getElementById('subBgColor').value = cfg.sub_bg_color || '#000000';
+  document.getElementById('subBgOpacity').value = cfg.sub_bg_opacity || 60;
   // update canvas positions
   titlePos.x = parseInt(cfg.title_x) || 10;
   titlePos.y = parseInt(cfg.title_y) || 80;
@@ -840,7 +890,14 @@ function getConf() {
     subFont:     document.getElementById('subFont').value,
     subSize:     parseInt(document.getElementById('subSize').value)     || 18,
     subColor:    document.getElementById('subColor').value,
+    subHighlightBg: document.getElementById('subHighlightColor').value,
+    subHighlightText: document.getElementById('subHighlightTextColor').value,
     subStroke:   document.getElementById('subStrokeColor').value,
+    subOutlineW: parseFloat(document.getElementById('subOutlineW').value) || 2,
+    subHlBox:    parseFloat(document.getElementById('subHlBox').value) || 16,
+    subBgEnabled: document.getElementById('subBgEnabled').checked,
+    subBgColor:   document.getElementById('subBgColor').value,
+    subBgOpacity: parseInt(document.getElementById('subBgOpacity').value) || 60,
     ovW, ovH,
   };
 }
@@ -935,18 +992,50 @@ function drawFrame() {
     ctx.save();
     ctx.font      = `bold ${c.subSize}px "${c.subFont}", sans-serif`;
     ctx.textAlign = 'left';
-    ctx.lineWidth = Math.max(1, c.subSize / 10);
+    ctx.lineWidth = c.subOutlineW;
     const cx = canvas.width / 2;
     const spaceW = ctx.measureText(' ').width;
 
+    // Measure all lines to compute background box dimensions
+    const lineMetrics = [];
+    let maxLineW = 0;
     lines.forEach((line, li) => {
-      const y = subBaseline - (lines.length - 1 - li) * lh;
       const words = line.trim().split(/\s+/);
       if (words.length === 0) return;
-
-      // Measure each word's width
       const wordWidths = words.map(w => ctx.measureText(w).width);
       const totalWidth = wordWidths.reduce((s, w) => s + w, 0) + spaceW * (words.length - 1);
+      lineMetrics.push({ words, wordWidths, totalWidth });
+      if (totalWidth > maxLineW) maxLineW = totalWidth;
+    });
+
+    // ── draw background box behind all subtitle lines ──────────────
+    if (c.subBgEnabled && lineMetrics.length > 0) {
+      const bgPadX = c.subSize * 0.5;
+      const bgPadY = c.subSize * 0.3;
+      const bgX = cx - maxLineW / 2 - bgPadX;
+      const topY = subBaseline - (lineMetrics.length - 1) * lh - c.subSize;
+      const bgW = maxLineW + bgPadX * 2;
+      const bgH = lineMetrics.length * lh + bgPadY * 2;
+
+      ctx.save();
+      ctx.globalAlpha = c.subBgOpacity / 100;
+      ctx.fillStyle = c.subBgColor;
+      if (ctx.roundRect) {
+        ctx.beginPath();
+        ctx.roundRect(bgX, topY - bgPadY, bgW, bgH, Math.max(4, c.subSize * 0.2));
+        ctx.fill();
+      } else {
+        ctx.fillRect(bgX, topY - bgPadY, bgW, bgH);
+      }
+      ctx.restore();
+    }
+    // ──────────────────────────────────────────────────────────────
+
+    lineMetrics.forEach((lm, li) => {
+      const y = subBaseline - (lineMetrics.length - 1 - li) * lh;
+      const words = lm.words;
+      const wordWidths = lm.wordWidths;
+      const totalWidth = lm.totalWidth;
 
       // Calculate which word is current based on segment progress
       const currentWordIdx = Math.min(words.length - 1, Math.floor(segProgress * words.length));
@@ -961,8 +1050,8 @@ function drawFrame() {
           const currentWordWidth = ctx.measureText(word).width;
           ctx.fillStyle = highlightColor;
 
-          const padX = c.subSize * 0.25;
-          const padY = c.subSize * 0.2;
+          const padX = c.subHlBox * 0.6;
+          const padY = c.subHlBox * 0.35;
           const bx = x - padX;
           const by = y - c.subSize + padY * 0.5;
           const bw = currentWordWidth + padX * 2;
@@ -976,7 +1065,7 @@ function drawFrame() {
               ctx.fillRect(bx, by, bw, bh);
           }
 
-          ctx.fillStyle = '#000000';
+          ctx.fillStyle = c.subHighlightText;
           ctx.fillText(word, x, y);
         } else {
           // Normal (non-highlighted) words
@@ -986,8 +1075,7 @@ function drawFrame() {
           ctx.fillText(word, x, y);
         }
 
-        // Advance x for the next word – this was missing, causing all
-        // words to paint at the same position and overlap each other.
+        // Advance x for the next word
         x += wordWidths[wi] + spaceW;
       });
     });
@@ -1076,7 +1164,6 @@ canvas.addEventListener('mousemove', e => {
     // dragging UP (dy < 0) increases the bottom margin = moves subs higher
     subPos.y = Math.max(0, Math.round(dragStart.oy - dy));
     document.getElementById('subY').value     = subPos.y;
-    document.getElementById('subYRange').value = subPos.y;
     document.getElementById('subYNum').value   = subPos.y;
   }
 });
@@ -1135,17 +1222,13 @@ const subNum   = document.getElementById('subSize');
 subRange.addEventListener('input',  () => { subNum.value   = subRange.value; });
 subNum.addEventListener('input',    () => { subRange.value = subNum.value;   });
 
-const subYRange = document.getElementById('subYRange');
-const subYNum   = document.getElementById('subYNum');
-subYRange.addEventListener('input', () => {
-  subYNum.value = subYRange.value;
-  subPos.y = parseInt(subYRange.value);
-  document.getElementById('subY').value = subPos.y;
-});
-subYNum.addEventListener('input', () => {
-  subYRange.value = subYNum.value;
-  subPos.y = parseInt(subYNum.value);
-  document.getElementById('subY').value = subPos.y;
-});
+// subtitle Y position – number-only (range slider removed)
+const subYNum = document.getElementById('subYNum');
+if (subYNum) {
+  subYNum.addEventListener('input', () => {
+    subPos.y = parseInt(subYNum.value) || 30;
+    document.getElementById('subY').value = subPos.y;
+  });
+}
 </script>
 {% endblock %}
