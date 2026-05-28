@@ -34,6 +34,10 @@
                 <input type="checkbox" name="skip_unsilence" class="form-check-input" id="skipUnsilence">
                 <label class="form-check-label small" for="skipUnsilence">Skip audio cleanup (already has quiet audio)</label>
             </div>
+            <div class="mb-3 form-check">
+                <input type="checkbox" name="skip_cropping" class="form-check-input" id="skipCropping">
+                <label class="form-check-label small" for="skipCropping">Skip face cropping (no face or already framed)</label>
+            </div>
             <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold">
               <i class="bi bi-lightning-charge-fill"></i> Start Processing
             </button>
@@ -75,7 +79,7 @@
             const response = await fetch('/check-job/' + jobId);
             const data = await response.json();
 
-            if (['running','starting','downloading','cutting','unsilencing','cropping','subtitling'].includes(data.status)) {
+            if (['running','starting','downloading','cutting','unsilencing','skipping unsilence','cropping','skipping cropping','subtitling'].includes(data.status)) {
                 document.getElementById('status-' + jobId).innerText = data.status;
             }
             else if (data.status === 'completed') {

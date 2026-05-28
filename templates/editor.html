@@ -222,7 +222,7 @@
         <!-- ─── SUBTITLES TAB ─── -->
         <div class="tab-pane fade" id="tab-subs">
           <div class="row g-2 mb-2">
-            <div class="col-md-4">
+            <div class="col-md-3">
               <label class="form-label small">Font</label>
               <select name="sub_font" id="subFont" class="form-select form-select-sm">
                 {% for font in font_list %}
@@ -230,7 +230,7 @@
                 {% endfor %}
               </select>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-2">
               <label class="form-label small">Size (px)</label>
               <div class="size-row">
                 <input type="range" id="subSizeRange" min="8" max="100" value="{{ job.sub_size or 18 }}">
@@ -243,6 +243,12 @@
               <input type="color" name="sub_color" id="subColor"
                      class="form-control form-control-color w-100"
                      value="{{ job.sub_color or '#ffffff' }}">
+            </div>
+            <div class="col-md-2">
+              <label class="form-label small">Highlight</label>
+              <input type="color" name="sub_highlight_color" id="subHighlightColor"
+                     class="form-control form-control-color w-100"
+                     value="{{ job.sub_highlight_color or '#ffff00' }}">
             </div>
             <div class="col-md-3">
               <label class="form-label small">Pos (from bottom)</label>
@@ -335,6 +341,7 @@ function collectConfig() {
     sub_font:           document.getElementById('subFont').value,
     sub_size:           document.getElementById('subSize').value,
     sub_color:          document.getElementById('subColor').value,
+    sub_highlight_color: document.getElementById('subHighlightColor').value,
     sub_stroke_color:   document.getElementById('subStrokeColor').value,
     sub_y:              document.getElementById('subY').value,
     overlay_x:          document.getElementById('overlayX').value,
@@ -351,6 +358,7 @@ function applyConfig(cfg) {
     'titleColor':'title_color','titleStrokeColor':'title_stroke_color',
     'titleX':'title_x','titleY':'title_y',
     'subFont':'sub_font','subSize':'sub_size','subColor':'sub_color',
+    'subHighlightColor':'sub_highlight_color',
     'subStrokeColor':'sub_stroke_color','subY':'sub_y',
     'overlayX':'overlay_x','overlayY':'overlay_y',
     'overlayW':'overlay_w','overlayH':'overlay_h',
@@ -486,10 +494,51 @@ if (editForm) {
 function setSubtitleText(text) {
   const disp = document.getElementById('subtitleDisplay');
   if (!disp) return;
-  // preserve HTML highlights when text is unchanged
-  if (disp.textContent !== text) {
-    disp.textContent = text;
+  
+  // NOU: Nu suprascriem textul dacă utilizatorul dă click și editează!
+  if (document.activeElement === disp) return; 
+
+  // Folosim innerHTML și verificăm diferențele pentru a nu bloca cursorul
+  if (disp.innerHTML !== text && disp.textContent !== text) {
+    disp.innerHTML = text;
   }
+}
+
+// NOU: Adăugăm un eveniment care ascultă ce tastezi și salvează live în SRT-ul principal
+const subtitleDisplay = document.getElementById('subtitleDisplay');
+if (subtitleDisplay) {
+  subtitleDisplay.addEventListener('input', function() {
+    if (currentSubIndex !== -1 && srtEntries[currentSubIndex]) {
+      const entry = srtEntries[currentSubIndex];
+      const ta = document.getElementById('srtTextarea');
+
+      // Salvăm html-ul pentru a păstra tag-urile <font> (highlight-urile manuale)
+      let html = this.innerHTML;
+      html = html.replace(/<span[^>]*class="highlight"[^>]*>(.*?)<\/span>/g, '<font color="yellow">$1</font>');
+      entry.text = html;
+
+      // Extragem textul curat (fără HTML) pentru fereastra brută de SRT
+      const rawText = this.textContent;
+      const newTextLinesPlain = rawText.split('\n');
+
+      const lines = ta.value.split('\n');
+      const start = entry.startLine + 2;
+      const end = entry.endLine;
+
+      lines.splice(start, end - start + 1, ...newTextLinesPlain);
+      ta.value = lines.join('\n');
+
+      // Ajustăm numărătoarea liniilor dacă ai dat 'Enter' și ai adăugat un rând nou
+      const lineDiff = newTextLinesPlain.length - (end - start + 1);
+      if (lineDiff !== 0) {
+        entry.endLine += lineDiff;
+        for (let i = currentSubIndex + 1; i < srtEntries.length; i++) {
+          srtEntries[i].startLine += lineDiff;
+          srtEntries[i].endLine += lineDiff;
+        }
+      }
+    }
+  });
 }
 
 // highlight selected word(s) in subtitleDisplay and track them.  Use mousedown so
@@ -865,7 +914,7 @@ function drawFrame() {
   ctx.stroke();
   ctx.restore();
 
-  // ── current subtitle ─────────────────────────────────────────────────
+  // ── current subtitle with word-level highlight ────────────────────────
   const t   = video.currentTime;
   const idx = srtEntries.findIndex(e => t >= e.start && t <= e.end);
   let sub = null;
@@ -877,19 +926,70 @@ function drawFrame() {
   }
   if (sub) {
     setSubtitleText(sub.text);
+    const segDuration = sub.end - sub.start;
+    const segProgress = segDuration > 0 ? Math.min(1, Math.max(0, (t - sub.start) / segDuration)) : 0;
+    const highlightColor = document.getElementById('subHighlightColor')?.value || '#ffff00';
+
     const lines = sub.text.split('\n');
     const lh    = c.subSize * 1.4;
     ctx.save();
     ctx.font      = `bold ${c.subSize}px "${c.subFont}", sans-serif`;
-    ctx.textAlign = 'center';
+    ctx.textAlign = 'left';
     ctx.lineWidth = Math.max(1, c.subSize / 10);
     const cx = canvas.width / 2;
-    lines.forEach((line, i) => {
-      const y = subBaseline - (lines.length - 1 - i) * lh;
-      ctx.strokeStyle = c.subStroke;
-      ctx.strokeText(line, cx, y);
-      ctx.fillStyle = c.subColor;
-      ctx.fillText(line, cx, y);
+    const spaceW = ctx.measureText(' ').width;
+
+    lines.forEach((line, li) => {
+      const y = subBaseline - (lines.length - 1 - li) * lh;
+      const words = line.trim().split(/\s+/);
+      if (words.length === 0) return;
+
+      // Measure each word's width
+      const wordWidths = words.map(w => ctx.measureText(w).width);
+      const totalWidth = wordWidths.reduce((s, w) => s + w, 0) + spaceW * (words.length - 1);
+
+      // Calculate which word is current based on segment progress
+      const currentWordIdx = Math.min(words.length - 1, Math.floor(segProgress * words.length));
+
+      let x = cx - totalWidth / 2;
+
+      words.forEach((word, wi) => {
+        const isCurrent = (wi === currentWordIdx);
+
+        if (isCurrent) {
+          // Draw background highlight box for the active word
+          const currentWordWidth = ctx.measureText(word).width;
+          ctx.fillStyle = highlightColor;
+
+          const padX = c.subSize * 0.25;
+          const padY = c.subSize * 0.2;
+          const bx = x - padX;
+          const by = y - c.subSize + padY * 0.5;
+          const bw = currentWordWidth + padX * 2;
+          const bh = c.subSize + padY;
+
+          if (ctx.roundRect) {
+              ctx.beginPath();
+              ctx.roundRect(bx, by, bw, bh, Math.max(4, c.subSize * 0.15));
+              ctx.fill();
+          } else {
+              ctx.fillRect(bx, by, bw, bh);
+          }
+
+          ctx.fillStyle = '#000000';
+          ctx.fillText(word, x, y);
+        } else {
+          // Normal (non-highlighted) words
+          ctx.strokeStyle = c.subStroke;
+          ctx.strokeText(word, x, y);
+          ctx.fillStyle = c.subColor;
+          ctx.fillText(word, x, y);
+        }
+
+        // Advance x for the next word – this was missing, causing all
+        // words to paint at the same position and overlap each other.
+        x += wordWidths[wi] + spaceW;
+      });
     });
     ctx.restore();
   } else {

@@ -88,6 +88,11 @@ def init_cache():
             c.execute('ALTER TABLE cache ADD COLUMN skip_unsilence INTEGER DEFAULT 0')
         except Exception:
             pass
+    if 'skip_cropping' not in columns:
+        try:
+            c.execute('ALTER TABLE cache ADD COLUMN skip_cropping INTEGER DEFAULT 0')
+        except Exception:
+            pass
     c.execute('''
         CREATE TABLE IF NOT EXISTS cache (
             url TEXT,
@@ -96,7 +101,8 @@ def init_cache():
             video TEXT,
             srt TEXT,
             skip_unsilence INTEGER DEFAULT 0,
-            UNIQUE(url, start, end, skip_unsilence)
+            skip_cropping INTEGER DEFAULT 0,
+            UNIQUE(url, start, end, skip_unsilence, skip_cropping)
         )
     ''')
     conn.commit()
@@ -164,26 +170,26 @@ def delete_template(name):
 init_cache()
 init_templates_db()
 
-def find_cache(url, start, end, skip_unsilence=False):
+def find_cache(url, start, end, skip_unsilence=False, skip_cropping=False):
     conn = sqlite3.connect(CACHE_DB)
     c = conn.cursor()
-    c.execute('SELECT video, srt FROM cache WHERE url=? AND start=? AND end=? AND skip_unsilence=?',
-              (url or '', start or '', end or '', int(skip_unsilence)))
+    c.execute('SELECT video, srt FROM cache WHERE url=? AND start=? AND end=? AND skip_unsilence=? AND skip_cropping=?',
+              (url or '', start or '', end or '', int(skip_unsilence), int(skip_cropping)))
     row = c.fetchone()
     conn.close()
     return row  # either None or (video, srt)
 
-def store_cache(url, start, end, video, srt, skip_unsilence=False):
+def store_cache(url, start, end, video, srt, skip_unsilence=False, skip_cropping=False):
     conn = sqlite3.connect(CACHE_DB)
     c = conn.cursor()
     try:
         if video is None or srt is None:
             # remove stale entry for this configuration
-            c.execute('DELETE FROM cache WHERE url=? AND start=? AND end=? AND skip_unsilence=?',
-                      (url or '', start or '', end or '', int(skip_unsilence)))
+            c.execute('DELETE FROM cache WHERE url=? AND start=? AND end=? AND skip_unsilence=? AND skip_cropping=?',
+                      (url or '', start or '', end or '', int(skip_unsilence), int(skip_cropping)))
         else:
-            c.execute('INSERT OR REPLACE INTO cache (url, start, end, video, srt, skip_unsilence) VALUES (?,?,?,?,?,?)',
-                      (url or '', start or '', end or '', video, srt, int(skip_unsilence)))
+            c.execute('INSERT OR REPLACE INTO cache (url, start, end, video, srt, skip_unsilence, skip_cropping) VALUES (?,?,?,?,?,?,?)',
+                      (url or '', start or '', end or '', video, srt, int(skip_unsilence), int(skip_cropping)))
         conn.commit()
     finally:
         conn.close()
@@ -445,6 +451,9 @@ def run_subtitles(input_video, output_dir, model="large", max_length=22, job_id=
     """Generate subtitles for a single video.
 
     If ``job_id`` is passed, stream the helper script's output into the job log.
+
+    Returns a tuple ``(srt_path, ass_path)`` — the ASS file contains word-level
+    karaoke tags for per-word highlighting during video rendering.
     """
     script = find_script("_generate_subtitles.py")
     cmd = [sys.executable, script, "--input", input_video, "--output", output_dir,
@@ -461,12 +470,84 @@ def run_subtitles(input_video, output_dir, model="large", max_length=22, job_id=
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             raise RuntimeError(f"subtitle generation failed: {result.stderr}")
-    # output srt name (the helper uses same convention)
+    # output files use same base name convention as the helper script
     base = os.path.splitext(os.path.basename(input_video))[0]
-    return os.path.join(output_dir, base + ".srt")
+    srt_path = os.path.join(output_dir, base + ".srt")
+    ass_path = os.path.join(output_dir, base + ".ass")
+    return srt_path, ass_path
 
-# 1. Adaugă această mică funcție helper undeva sus în app.py sau chiar deasupra pipeline-ului 
-# pentru a converti orice format de timp (secunde float, "MM:SS" sau "HH:MM:SS") în secunde pure.
+# ── face detection helpers ────────────────────────────────────────────────
+
+def detect_faces_in_video(video_path: str, sample_frames: int = 5):
+    """Detect faces in the first few frames of a video using OpenCV Haar cascade.
+
+    Returns a dict with:
+        - has_face: bool, whether at least one frontal face was detected
+        - face_count: average number of faces per frame
+        - facing: 'frontal' if faces detected, 'none' otherwise
+        - confidence: rough percentage of frames where a face was found
+    """
+    try:
+        import cv2
+    except ImportError:
+        return {'has_face': False, 'face_count': 0, 'facing': 'none',
+                'confidence': 0, 'error': 'OpenCV not installed'}
+
+    cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+    if not os.path.exists(cascade_path):
+        return {'has_face': False, 'face_count': 0, 'facing': 'none',
+                'confidence': 0, 'error': 'Haar cascade not found'}
+
+    face_cascade = cv2.CascadeClassifier(cascade_path)
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        return {'has_face': False, 'face_count': 0, 'facing': 'none',
+                'confidence': 0, 'error': 'Cannot open video'}
+
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    if total_frames <= 0:
+        cap.release()
+        return {'has_face': False, 'face_count': 0, 'facing': 'none',
+                'confidence': 0, 'error': 'No frames in video'}
+
+    # sample evenly across the first half of the video
+    step = max(1, (total_frames // 2) // sample_frames)
+    frames_with_faces = 0
+    total_faces = 0
+    frames_checked = 0
+
+    for i in range(0, min(total_frames // 2, sample_frames * step), step):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, i)
+        ret, frame = cap.read()
+        if not ret:
+            break
+        frames_checked += 1
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(80, 80))
+        if len(faces) > 0:
+            frames_with_faces += 1
+            total_faces += len(faces)
+
+    cap.release()
+
+    if frames_checked == 0:
+        return {'has_face': False, 'face_count': 0, 'facing': 'none', 'confidence': 0}
+
+    confidence = (frames_with_faces / frames_checked) * 100
+    has_face = frames_with_faces >= frames_checked * 0.4  # at least 40% of frames
+    avg_faces = total_faces / frames_checked if frames_checked > 0 else 0
+
+    return {
+        'has_face': has_face,
+        'face_count': round(avg_faces, 1),
+        'facing': 'frontal' if has_face else 'none',
+        'confidence': round(confidence, 1),
+        'frames_checked': frames_checked,
+        'frames_with_faces': frames_with_faces,
+    }
+
+
+# convert any time format (seconds float, "MM:SS" or "HH:MM:SS") to pure seconds.
 def _time_to_seconds(t_val):
     if isinstance(t_val, (int, float)):
         return float(t_val)
@@ -479,12 +560,12 @@ def _time_to_seconds(t_val):
             return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
     return float(t_str)
 
-def background_pipeline(job_id, url=None, upload_path=None, start_time="0", end_time=None, skip_unsilence=False):
+def background_pipeline(job_id, url=None, upload_path=None, start_time="0", end_time=None, skip_unsilence=False, skip_cropping=False):
     """Background thread that cuts/downloads then optionally unsilences, crops, subtitles.
 
     ``skip_unsilence`` is used when the user knows the clip already has clean audio.
-    This is recorded in the cache so repeated calls with the same parameters will
-    behave identically.
+    ``skip_cropping`` is used to bypass the face-crop step entirely (e.g. when no face is present).
+    These flags are recorded in the cache so repeated calls behave identically.
     """
     update_job(job_id, status="starting", log="job created")
     try:
@@ -546,11 +627,15 @@ def background_pipeline(job_id, url=None, upload_path=None, start_time="0", end_
             unsilenced = os.path.join(DOWNLOADS_DIR, f"job_{job_id}_unsilenced.mp4")
             run_unsilence(cut_path, unsilenced, job_id=job_id)
 
-        update_job(job_id, status="cropping", log="running crop script")
-        cropped = run_crop(unsilenced, DOWNLOADS_DIR)
+        if skip_cropping:
+            update_job(job_id, status="skipping cropping", log="user requested no face cropping")
+            cropped = unsilenced
+        else:
+            update_job(job_id, status="cropping", log="running crop script")
+            cropped = run_crop(unsilenced, DOWNLOADS_DIR)
 
         update_job(job_id, status="subtitling", log="generating subtitles")
-        srtfile = run_subtitles(cropped, DOWNLOADS_DIR, job_id=job_id)
+        srtfile, assfile = run_subtitles(cropped, DOWNLOADS_DIR, job_id=job_id)
 
         # sanity check: ensure subtitles were actually written
         if not os.path.exists(srtfile):
@@ -559,12 +644,13 @@ def background_pipeline(job_id, url=None, upload_path=None, start_time="0", end_
         update_job(job_id, status="completed",
                    video=os.path.basename(cropped),
                    srt=os.path.basename(srtfile),
+                   ass=os.path.basename(assfile) if os.path.exists(assfile) else None,
                    log="all steps finished")
         # cache this result for future identical requests
         if url:
             store_cache(url, start_time, end_time,
                         os.path.basename(cropped), os.path.basename(srtfile),
-                        skip_unsilence=skip_unsilence)
+                        skip_unsilence=skip_unsilence, skip_cropping=skip_cropping)
     except Exception as e:
         update_job(job_id, status="error", msg=str(e))
 
@@ -577,6 +663,7 @@ def video_cut():
         start_time = request.form.get('start_time') or "0"
         end_time = request.form.get('end_time')
         skip_unsilence = request.form.get('skip_unsilence') == 'on'
+        skip_cropping = request.form.get('skip_cropping') == 'on'
         job_id = request.form.get('job_id') or f"J{int(datetime.datetime.now().timestamp())}"
 
         upload_path = None
@@ -592,7 +679,7 @@ def video_cut():
 
         # if this is a URL request, check cache first
         if url and not upload_path:
-            cached = find_cache(url, start_time, end_time, skip_unsilence=skip_unsilence)
+            cached = find_cache(url, start_time, end_time, skip_unsilence=skip_unsilence, skip_cropping=skip_cropping)
             if cached:
                 video_name, srt_name = cached
                 video_path = os.path.join(DOWNLOADS_DIR, video_name)
@@ -605,7 +692,7 @@ def video_cut():
                     return {"status": "completed", "job_id": job_id}, 200
                 else:
                     # cache is stale; remove entry entirely
-                    store_cache(url, start_time, end_time, None, None, skip_unsilence=skip_unsilence)
+                    store_cache(url, start_time, end_time, None, None, skip_unsilence=skip_unsilence, skip_cropping=skip_cropping)
 
         # start background work
         thread = threading.Thread(target=background_pipeline,
@@ -616,6 +703,7 @@ def video_cut():
                                       'start_time': start_time,
                                       'end_time': end_time,
                                       'skip_unsilence': skip_unsilence,
+                                      'skip_cropping': skip_cropping,
                                   })
         thread.start()
         return {"status": "accepted", "job_id": job_id}, 202
@@ -627,6 +715,54 @@ def video_cut():
 def check_job(job_id):
     info = active_jobs.get(job_id, {'status': 'not_found'})
     return json.dumps(info)
+
+
+@app.route('/api/detect-faces/<job_id>')
+@login_required
+def api_detect_faces(job_id):
+    """Run face detection on a job's current video and return the results.
+
+    The detection runs on the current (possibly cropped) video file.
+    Use this to decide whether to toggle skip_cropping for future runs.
+    """
+    job = active_jobs.get(job_id)
+    if not job or 'video' not in job:
+        return json.dumps({'ok': False, 'error': 'Job not found or no video yet'}), 404
+
+    video_path = os.path.join(DOWNLOADS_DIR, job['video'])
+    if not os.path.exists(video_path):
+        return json.dumps({'ok': False, 'error': 'Video file not found on disk'}), 404
+
+    result = detect_faces_in_video(video_path)
+    result['ok'] = True
+    return json.dumps(result)
+
+
+@app.route('/api/detect-faces-file', methods=['POST'])
+@login_required
+def api_detect_faces_file():
+    """Run face detection on an uploaded video file (temporary).
+
+    Accepts a multipart upload; saves to a temp location, runs detection,
+    then cleans up.  Returns the same dict as /api/detect-faces/<job_id>.
+    """
+    f = request.files.get('file')
+    if not f or not f.filename:
+        return json.dumps({'ok': False, 'error': 'No file uploaded'}), 400
+
+    tmp_name = f"face_detect_{int(datetime.datetime.now().timestamp())}_{f.filename}"
+    tmp_path = os.path.join(DOWNLOADS_DIR, tmp_name)
+    try:
+        f.save(tmp_path)
+        result = detect_faces_in_video(tmp_path)
+        result['ok'] = True
+        return json.dumps(result)
+    finally:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
 
 
 @app.route('/download/<filename>')
@@ -792,6 +928,7 @@ def editor(job_id):
         title_y      = request.form.get('title_y', '80')
         sub_font     = request.form.get('sub_font', 'Arial')
         sub_color    = request.form.get('sub_color', '#ffffff')
+        sub_highlight_color = request.form.get('sub_highlight_color', '#ffff00')
         sub_stroke   = request.form.get('sub_stroke_color', '#000000')
         sub_size     = request.form.get('sub_size', '18')
         sub_y        = request.form.get('sub_y', job.get('sub_y', '30'))
@@ -808,6 +945,7 @@ def editor(job_id):
             'title_color': title_color, 'title_stroke_color': title_stroke,
             'title_size': title_size,   'title_x': title_x, 'title_y': title_y,
             'sub_font': sub_font,       'sub_color': sub_color,
+            'sub_highlight_color': sub_highlight_color,
             'sub_stroke_color': sub_stroke, 'sub_size': sub_size, 'sub_y': sub_y,
             'overlay_x': overlay_x,    'overlay_y': overlay_y,
             'overlay_w': overlay_w,    'overlay_h': overlay_h,
@@ -878,17 +1016,48 @@ def editor(job_id):
         vf_parts = []
 
         if has_srt:
-            # Escape drive-letter colon so ffmpeg filter parser treats it literally.
-            srt_abs = srt_path.replace('\\', '/').replace(':', '\\:')
-            vid_w, vid_h = get_video_size(os.path.join(DOWNLOADS_DIR, orig_video))
-            sub_style = (
-                f"PlayResX={vid_w},PlayResY={vid_h},"
-                f"FontName={sub_font},FontSize={sub_size},"
-                f"PrimaryColour={html_to_ass_color(sub_color)},"
-                f"OutlineColour={html_to_ass_color(sub_stroke)},"
-                f"Outline=2,Alignment=2,MarginV={sub_y}"
-            )
-            vf_parts.append(f"subtitles='{srt_abs}':force_style='{sub_style}'")
+            # Use ASS file for word-level background-highlight when available
+            ass_path = os.path.join(DOWNLOADS_DIR, job.get('ass', ''))
+            use_karaoke = os.path.exists(ass_path)
+
+            if use_karaoke:
+                sub_highlight = job.get('sub_highlight_color', '#ffff00')
+                # Convert HTML colours to ASS BBGGRR format for \\3c/\\1c tags.
+                # html_to_ass_color returns &H00BBGGRR — we strip the &H00 prefix
+                # and trailing & to get the 6-char BBGGRR used in override tags.
+                ass_hl_full = html_to_ass_color(sub_highlight)
+                hl_hex = ass_hl_full[4:10]  # BBGGRR for highlight background
+                # Text on highlight bg: black for maximum contrast
+                hl_fg = '000000'
+                border_px = str(max(8, int(sub_size) // 3))
+
+                with open(ass_path, 'r', encoding='utf-8') as _af:
+                    ass_content = _af.read()
+                ass_content = (ass_content
+                    .replace('##HLBG##', hl_hex)
+                    .replace('##HLFG##', hl_fg)
+                    .replace('##BORD##', border_px))
+                patched_ass = os.path.join(DOWNLOADS_DIR, f"job_{job_id}_patched.ass")
+                with open(patched_ass, 'w', encoding='utf-8', newline='\n') as _af:
+                    _af.write(ass_content)
+                ass_abs = patched_ass.replace('\\', '/').replace(':', '\\:')
+                sub_style = (
+                    f"FontName={sub_font},FontSize={sub_size},"
+                    f"PrimaryColour={html_to_ass_color(sub_color)},"
+                    f"OutlineColour={html_to_ass_color(sub_stroke)},"
+                    f"Outline=2,Alignment=2,MarginV={sub_y}"
+                )
+                vf_parts.append(f"subtitles='{ass_abs}':force_style='{sub_style}'")
+            else:
+                # Fall back to plain SRT when no ASS file exists
+                srt_abs = srt_path.replace('\\', '/').replace(':', '\\:')
+                sub_style = (
+                    f"FontName={sub_font},FontSize={sub_size},"
+                    f"PrimaryColour={html_to_ass_color(sub_color)},"
+                    f"OutlineColour={html_to_ass_color(sub_stroke)},"
+                    f"Outline=2,Alignment=2,MarginV={sub_y}"
+                )
+                vf_parts.append(f"subtitles='{srt_abs}':force_style='{sub_style}'")
 
         if has_title:
             font_file = FONT_MAP.get(title_font, 'C:/Windows/Fonts/arial.ttf')

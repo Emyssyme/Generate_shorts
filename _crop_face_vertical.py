@@ -31,17 +31,21 @@ def load_overlay(overlay_path, output_size):
     overlay = cv2.resize(overlay, output_size)
     return overlay
 
-def detect_face_center(frame, net, conf_threshold=0.5):
+def detect_face_center(frame, prev_gray, last_center, net, conf_threshold=0.5, motion_threshold=1.5):
     """
-    Use OpenCV DNN with the provided Caffe model to detect faces.
-    Returns the center (x,y) of the largest detected face, or None if no face passes the threshold.
+    Detectează fețele combinând mișcarea adaptivă cu urmărirea (Sticky Tracking).
+    Dacă apare mișcare evidentă în cadru, prioritizează fața care se mișcă pentru a evita
+    blocarea pe tablouri sau icoane statice de la începutul videoclipului.
     """
     h, w = frame.shape[:2]
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    
     blob = cv2.dnn.blobFromImage(frame, 1.0, (300, 300), (104.0, 177.0, 123.0))
     net.setInput(blob)
     detections = net.forward()
-    best_center = None
-    best_area = 0
+
+    valid_faces = []
+
     for i in range(detections.shape[2]):
         confidence = detections[0, 0, i, 2]
         if confidence > conf_threshold:
@@ -51,11 +55,72 @@ def detect_face_center(frame, net, conf_threshold=0.5):
             y1 = max(0, y1)
             x2 = min(w - 1, x2)
             y2 = min(h - 1, y2)
+            
             area = (x2 - x1) * (y2 - y1)
-            if area > best_area:
-                best_area = area
-                best_center = ((x1 + x2) // 2, (y1 + y2) // 2)
-    return best_center
+            if area < 1000:  # Ignorăm zgomotul mic
+                continue
+                
+            center = ((x1 + x2) // 2, (y1 + y2) // 2)
+
+            # Calculăm mișcarea în interiorul feței curent vs anterior
+            motion_score = 0.0
+            if prev_gray is not None:
+                roi_current = gray[y1:y2, x1:x2]
+                roi_prev = prev_gray[y1:y2, x1:x2]
+                
+                if roi_current.shape == roi_prev.shape and roi_current.size > 0:
+                    diff = cv2.absdiff(roi_current, roi_prev)
+                    motion_score = np.mean(diff)
+            else:
+                # Primul cadru primește un scor simbolic
+                motion_score = 2.0
+
+            valid_faces.append({
+                'center': center,
+                'area': area,
+                'motion_score': motion_score
+            })
+
+    if not valid_faces:
+        return None, gray
+
+    # Separăm fețele care se mișcă activ de cele statice
+    moving_faces = [f for f in valid_faces if f['motion_score'] > motion_threshold]
+
+    # --- REGULA 1: DACĂ AVEM TIMP DE MIȘCARE ACTIVĂ ÎN CADRU ---
+    if moving_faces:
+        # Dacă aveam deja un istoric (last_center)
+        if last_center is not None:
+            # Căutăm dacă printre fețele în mișcare există una aproape de unde știam noi (vorbitorul care doar s-a mișcat puțin)
+            max_allowed_distance = w * 0.25
+            moving_near_last = [
+                f for f in moving_faces 
+                if np.sqrt((f['center'][0] - last_center[0])**2 + (f['center'][1] - last_center[1])**2) < max_allowed_distance
+            ]
+            if moving_near_last:
+                # Vorbitorul curent se mișcă și e pe poziție -> îl alegem pe el
+                best_face = max(moving_near_last, key=lambda f: f['area'])
+                return best_face['center'], gray
+
+        # Dacă nu e niciuna în mișcare aproape de vechiul centru, înseamnă că omul real s-a mișcat în altă parte 
+        # sau s-a activat acum. Luăm cea mai mare față în mișcare din tot cadrul (ignorând fețele statice/tablourile).
+        best_face = max(moving_faces, key=lambda f: f['area'])
+        return best_face['center'], gray
+
+    # --- REGULA 2: FALLBACK (Nimeni nu se mișcă activ în acest cadru - ex: pauză de vorbire) ---
+    if last_center is not None:
+        # Păstrăm fața cea mai apropiată de poziția anterioară (chiar dacă acum e statică)
+        max_allowed_distance = w * 0.25
+        closest_face = min(valid_faces, key=lambda f: np.sqrt((f['center'][0] - last_center[0])**2 + (f['center'][1] - last_center[1])**2))
+        dist = np.sqrt((closest_face['center'][0] - last_center[0])**2 + (closest_face['center'][1] - last_center[1])**2)
+        
+        if dist < max_allowed_distance:
+            return closest_face['center'], gray
+
+    # --- REGULA 3: PRIMUL CADRU SAU TOTUL E PIERDUT ---
+    # Alegem pur și simplu cea mai mare față detectată
+    best_face = max(valid_faces, key=lambda f: f['area'])
+    return best_face['center'], gray
 
 def process_video(video_path, output_path, net, overlay, smoothing=0.8):
     """
@@ -90,21 +155,31 @@ def process_video(video_path, output_path, net, overlay, smoothing=0.8):
     face_centers = []
     start_time = time.time()
     frame_idx = 0
+    
+    prev_gray = None
+    last_known_center = None
 
     while True:
         ret, frame = cap.read()
         if not ret:
             break
 
-        center = detect_face_center(frame, net, conf_threshold=0.5)
+        # Transmitem cadrul anterior și ultimul centru pentru a detecta mișcarea
+        center, prev_gray = detect_face_center(frame, prev_gray, last_known_center, net, conf_threshold=0.5)
+        
         face_centers.append(center)
+        
+        if center is not None:
+            last_known_center = center
+            
         frame_idx += 1
 
         if frame_idx % 30 == 0 or frame_idx == total_frames:
             elapsed = time.time() - start_time
-            estimated = (elapsed / frame_idx) * (total_frames - frame_idx)
-            print(f"  Detected {frame_idx}/{total_frames} frames. Estimated time remaining: {estimated:.2f} sec.")
-
+            # Evităm împărțirea la zero în cazul puțin probabil în care suntem la cadrul 0
+            if frame_idx > 0:
+                estimated = (elapsed / frame_idx) * (total_frames - frame_idx)
+                print(f"  Detected {frame_idx}/{total_frames} frames. Estimated time remaining: {estimated:.2f} sec.")
     cap.release()
 
     # Forward fill for missing detection values.
