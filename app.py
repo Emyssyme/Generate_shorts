@@ -150,6 +150,17 @@ def copy_overlay_to_template_assets(overlay_name, template_name):
     return safe_name
 
 
+def resolve_overlay_path(overlay_name):
+    if not overlay_name:
+        return None
+    overlay_name = os.path.basename(overlay_name)
+    candidates = [
+        os.path.join(DOWNLOADS_DIR, overlay_name),
+        os.path.join(TEMPLATE_ASSETS_DIR, overlay_name),
+    ]
+    return next((p for p in candidates if os.path.exists(p)), None)
+
+
 def get_all_templates():
     """Return list of template names."""
     conn = sqlite3.connect(TEMPLATES_DB)
@@ -1151,8 +1162,9 @@ def editor(job_id):
         # job so render uses it — provided the file actually exists on disk.
         if not job.get('overlay'):
             ov_from_field = request.form.get('current_overlay_file', '').strip()
-            if ov_from_field and os.path.exists(os.path.join(DOWNLOADS_DIR, ov_from_field)):
-                job['overlay'] = ov_from_field
+            overlay_path = resolve_overlay_path(ov_from_field)
+            if ov_from_field and overlay_path:
+                job['overlay'] = os.path.basename(ov_from_field)
         overlay_filename = job.get('overlay')
 
         # when saving settings without running ffmpeg we still need to persist
@@ -1168,8 +1180,8 @@ def editor(job_id):
         new_video_name = f"job_{job_id}_final.mp4"
 
         has_srt     = os.path.exists(srt_path) and os.path.getsize(srt_path) > 0
-        has_overlay = bool(overlay_filename and
-                           os.path.exists(os.path.join(DOWNLOADS_DIR, overlay_filename)))
+        overlay_path = resolve_overlay_path(overlay_filename)
+        has_overlay = bool(overlay_path)
         has_title   = bool(title_text)
 
         # before we build filters, scale coords/sizes if preview dimensions are
@@ -1328,7 +1340,7 @@ def editor(job_id):
             update_job(job_id, log=f"filter_complex (overlay): {fc}")
             cmd = [
                 'ffmpeg', '-nostdin', '-y',
-                '-i', orig_video, '-i', overlay_filename,
+                '-i', orig_video, '-i', overlay_path,
                 '-filter_complex_script', fc_script_name,
                 '-map', out_label, '-map', '0:a?',
                 *VIDEO_QUALITY, '-c:a', 'copy', new_video_name,
