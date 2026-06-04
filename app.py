@@ -9,6 +9,7 @@ import asyncio
 import threading
 import subprocess
 import unicodedata
+import shutil
 import sqlite3
 from flask import Flask, render_template, request, flash, redirect, url_for, send_from_directory
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
@@ -76,6 +77,8 @@ if not FONT_MAP:
 # simple sqlite cache to avoid reprocessing identical url/time ranges
 CACHE_DB = os.path.join(BASE_DIR, "cache.db")
 TEMPLATES_DB = os.path.join(BASE_DIR, "templates.db")
+TEMPLATE_ASSETS_DIR = os.path.join(BASE_DIR, "template_assets")
+os.makedirs(TEMPLATE_ASSETS_DIR, exist_ok=True)
 
 def init_cache():
     conn = sqlite3.connect(CACHE_DB)
@@ -123,6 +126,30 @@ def init_templates_db():
     conn.commit()
     conn.close()
 
+
+def sanitize_template_filename(name):
+    return re.sub(r'[^A-Za-z0-9_.-]', '_', name)
+
+
+def copy_overlay_to_template_assets(overlay_name, template_name):
+    if not overlay_name:
+        return None
+    overlay_name = os.path.basename(overlay_name)
+    source_paths = [
+        os.path.join(DOWNLOADS_DIR, overlay_name),
+        os.path.join(TEMPLATE_ASSETS_DIR, overlay_name),
+    ]
+    source = next((p for p in source_paths if os.path.exists(p)), None)
+    if not source:
+        return None
+    base, ext = os.path.splitext(overlay_name)
+    safe_name = sanitize_template_filename(f"{template_name}_{base}{ext}")
+    dest = os.path.join(TEMPLATE_ASSETS_DIR, safe_name)
+    if os.path.abspath(source) != os.path.abspath(dest):
+        shutil.copy2(source, dest)
+    return safe_name
+
+
 def get_all_templates():
     """Return list of template names."""
     conn = sqlite3.connect(TEMPLATES_DB)
@@ -145,6 +172,15 @@ def get_template(name):
 
 def save_template(name, config):
     """Insert or update a template. Returns True on success."""
+    config = dict(config)
+    overlay_name = config.get('overlay')
+    if overlay_name:
+        copied_name = copy_overlay_to_template_assets(overlay_name, name)
+        if copied_name:
+            config['overlay'] = copied_name
+        else:
+            config.pop('overlay', None)
+
     conn = sqlite3.connect(TEMPLATES_DB)
     c = conn.cursor()
     try:
@@ -160,11 +196,30 @@ def save_template(name, config):
 
 def delete_template(name):
     """Delete a template by name."""
+    cfg = get_template(name)
+    overlay_name = cfg.get('overlay') if cfg else None
+
     conn = sqlite3.connect(TEMPLATES_DB)
     c = conn.cursor()
     c.execute('DELETE FROM templates WHERE name=?', (name,))
     conn.commit()
     conn.close()
+
+    if overlay_name:
+        # only remove the saved asset if no other template references it
+        conn = sqlite3.connect(TEMPLATES_DB)
+        c = conn.cursor()
+        c.execute('SELECT config FROM templates')
+        rows = c.fetchall()
+        conn.close()
+        still_used = any(json.loads(row[0]).get('overlay') == overlay_name for row in rows)
+        if not still_used:
+            asset_path = os.path.join(TEMPLATE_ASSETS_DIR, overlay_name)
+            try:
+                if os.path.exists(asset_path):
+                    os.remove(asset_path)
+            except Exception:
+                pass
 
 # initialize databases when the module loads
 init_cache()
@@ -692,30 +747,37 @@ def background_pipeline(job_id, url=None, upload_path=None, start_time="0", end_
                 ff += ["-c", "copy", cut_path]
                 subprocess.run(ff, check=True)
         else:
-            update_job(job_id, status="cutting", log=f"trimming {upload_path}")
-            # trim local file
+            # Verificăm dacă avem nevoie de o tăiere sau folosim direct fișierul original
             start_sec = _time_to_seconds(start_time)
-    
-            # Pornim comanda cu -ss ÎNAINTE de -i pentru căutare ultra-rapidă în fișiere mari
-            ff = ["ffmpeg", "-y", "-ss", f"{start_sec:.3f}", "-i", upload_path]
             
-            if end_time:
-                end_sec = _time_to_seconds(end_time)
-                duration = end_sec - start_sec
-                if duration > 0:
-                    # Folosim -t (durata) în loc de -to, deoarece axa timpului s-a resetat prin mutarea lui -ss
-                    ff += ["-t", f"{duration:.3f}"]
+            if start_sec == 0 and not end_time:
+                update_job(job_id, status="skipping cutting", log="no time limits provided, using original uploaded file")
+                # Pasăm fișierul original mai departe în pipeline fără re-encodare/tăiere
+                cut_path = upload_path
+            else:
+                update_job(job_id, status="cutting", log=f"trimming {upload_path}")
+                # trim local file
+        
+                # Pornim comanda cu -ss ÎNAINTE de -i pentru căutare ultra-rapidă în fișiere mari
+                ff = ["ffmpeg", "-y", "-ss", f"{start_sec:.3f}", "-i", upload_path]
+                
+                if end_time:
+                    end_sec = _time_to_seconds(end_time)
+                    duration = end_sec - start_sec
+                    if duration > 0:
+                        # Folosim -t (durata) în loc de -to, deoarece axa timpului s-a resetat prin mutarea lui -ss
+                        ff += ["-t", f"{duration:.3f}"]
 
-            # Înlocuim "-c", "copy" cu re-encodare rapidă și curățare de timestamp-uri
-            ff += [
-                "-c:v", "libx264",        # Codec video compatibil oriunde
-                "-c:a", "aac",            # Codec audio standard
-                "-preset", "fast",        # Randare rapidă
-                "-crf", "22",             # Calitate vizuală excelentă
-                "-avoid_negative_ts", "make_zero", # Resetează indicii de timp la 0 (rezolvă freeze-ul pe TikTok/VLC)
-                cut_path
-            ]
-            subprocess.run(ff, check=True)
+                # Înlocuim "-c", "copy" cu re-encodare rapidă și curățare de timestamp-uri
+                ff += [
+                    "-c:v", "libx264",        # Codec video compatibil oriunde
+                    "-c:a", "aac",            # Codec audio standard
+                    "-preset", "fast",        # Randare rapidă
+                    "-crf", "22",             # Calitate vizuală excelentă
+                    "-avoid_negative_ts", "make_zero", # Resetează indicii de timp la 0 (rezolvă freeze-ul pe TikTok/VLC)
+                    cut_path
+                ]
+                subprocess.run(ff, check=True)
 
         if skip_unsilence:
             update_job(job_id, status="skipping unsilence", log="user requested no audio cleaning")
@@ -879,19 +941,21 @@ def preview_file(filename):
     transcode to h264 on-the-fly and send the converted file instead.  The new
     file is cached alongside the original so the conversion only happens once.
     """
-    path = os.path.join(DOWNLOADS_DIR, filename)
-    if os.path.exists(path) and not is_h264(path):
-        # only transcode files that actually contain a video stream —
-        # otherwise we'd corrupt images (overlays) by feeding them to ffmpeg
-        ext = os.path.splitext(path)[1].lower()
-        if ext in ('.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.flv'):
-            try:
-                new_path = transcode_to_h264(path)
-                filename = os.path.basename(new_path)
-            except Exception as e:
-                # conversion failed; log but fall back to original
-                print(f"preview transcode failed: {e}")
-    return send_from_directory(DOWNLOADS_DIR, filename, as_attachment=False)
+    search_dirs = [DOWNLOADS_DIR, TEMPLATE_ASSETS_DIR]
+    for directory in search_dirs:
+        path = os.path.join(directory, filename)
+        if os.path.exists(path):
+            if directory == DOWNLOADS_DIR and not is_h264(path):
+                ext = os.path.splitext(path)[1].lower()
+                if ext in ('.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.flv'):
+                    try:
+                        new_path = transcode_to_h264(path)
+                        filename = os.path.basename(new_path)
+                        return send_from_directory(DOWNLOADS_DIR, filename, as_attachment=False)
+                    except Exception as e:
+                        print(f"preview transcode failed: {e}")
+            return send_from_directory(directory, filename, as_attachment=False)
+    return '', 404
 
 
 # High-quality encoding flags reused across all editor render commands.
