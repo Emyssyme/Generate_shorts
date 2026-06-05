@@ -151,6 +151,20 @@
             <label class="form-label fw-semibold">Logo / Watermark <span class="text-muted fw-normal">(PNG with transparency)</span></label>
             <input type="file" name="overlay" class="form-control" accept="image/*" id="overlayInput">
           </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Custom fonts</label>
+            <div class="row g-2 align-items-end">
+              <div class="col-md-7">
+                <input type="file" name="font_file" class="form-control" accept=".ttf,.otf" id="fontUploadInput">
+              </div>
+              <div class="col-md-5">
+                <button type="submit" name="download_fonts" value="1" class="btn btn-sm btn-outline-primary w-100">
+                  <i class="bi bi-download"></i> Download Inter fonts
+                </button>
+              </div>
+            </div>
+            <small class="text-muted">Upload a .ttf/.otf file to add it to the editor font list, or download Inter if not present.</small>
+          </div>
           {% if job.overlay %}
           <div class="mb-2">
             <span class="badge" style="background:var(--accent2);">{{ job.overlay }}</span>
@@ -175,6 +189,9 @@
               </div>
             </div>
           </div>
+          <div class="mb-3">
+            <small class="text-muted">Use the yellow corner handle on the preview canvas to resize the overlay, or enter explicit width/height values.</small>
+          </div>
         </div>
 
         <!-- ─── TITLE / TEXT TAB ─── -->
@@ -185,13 +202,19 @@
                    value="{{ job.title_text or '' }}" placeholder="Enter title or leave blank to skip">
           </div>
           <div class="row g-2 mb-2">
-            <div class="col-md-5">
+            <div class="col-md-4">
               <label class="form-label small">Font</label>
               <select name="title_font" id="titleFont" class="form-select form-select-sm">
                 {% for font in font_list %}
                 <option value="{{ font }}" {% if job.title_font == font %}selected{% endif %}>{{ font }}</option>
                 {% endfor %}
               </select>
+            </div>
+            <div class="col-md-2 d-flex align-items-center">
+              <div class="form-check mt-4">
+                <input class="form-check-input" type="checkbox" value="1" id="titleBold" name="title_bold" {% if job.title_bold %}checked{% endif %}>
+                <label class="form-check-label small" for="titleBold">Bold</label>
+              </div>
             </div>
             <div class="col-md-3">
               <label class="form-label small">Size (px)</label>
@@ -201,7 +224,7 @@
                        value="{{ job.title_size or 48 }}" min="8" max="200">
               </div>
             </div>
-            <div class="col-md-2">
+            <div class="col-md-3">
               <label class="form-label small">Color</label>
               <input type="color" name="title_color" id="titleColor"
                      class="form-control form-control-color w-100"
@@ -212,6 +235,18 @@
               <input type="color" name="title_stroke_color" id="titleStrokeColor"
                      class="form-control form-control-color w-100"
                      value="{{ job.title_stroke_color or '#000000' }}">
+            </div>
+          </div>
+          <div class="row g-2 mb-2">
+            <div class="col-md-6">
+              <label class="form-label small">Render mode</label>
+              <select name="gpu_mode" id="gpuMode" class="form-select form-select-sm">
+                <option value="auto" {% if job.gpu_mode == 'auto' %}selected{% endif %}>Auto (GPU if available, otherwise CPU)</option>
+                <option value="cpu" {% if job.gpu_mode != 'h264_nvenc' and job.gpu_mode != 'hevc_nvenc' and job.gpu_mode != 'auto' %}selected{% endif %}>CPU (libx264)</option>
+                <option value="h264_nvenc" {% if job.gpu_mode == 'h264_nvenc' %}selected{% endif %}>NVIDIA h264_nvenc</option>
+                <option value="hevc_nvenc" {% if job.gpu_mode == 'hevc_nvenc' %}selected{% endif %}>NVIDIA hevc_nvenc</option>
+              </select>
+              <small class="text-muted">Use dedicated GPU if available.</small>
             </div>
           </div>
           <small class="text-muted d-block mt-2">
@@ -229,6 +264,12 @@
                 <option value="{{ font }}" {% if job.sub_font == font %}selected{% endif %}>{{ font }}</option>
                 {% endfor %}
               </select>
+            </div>
+            <div class="col-md-2 d-flex align-items-center">
+              <div class="form-check mt-4">
+                <input class="form-check-input" type="checkbox" value="1" id="subBold" name="sub_bold" {% if job.sub_bold %}checked{% endif %}>
+                <label class="form-check-label small" for="subBold">Bold</label>
+              </div>
             </div>
             <div class="col-md-2">
               <label class="form-label small">Size (px)</label>
@@ -372,9 +413,12 @@ function collectConfig() {
     title_stroke_color: document.getElementById('titleStrokeColor').value,
     title_x:            document.getElementById('titleX').value,
     title_y:            document.getElementById('titleY').value,
+    title_bold:         document.getElementById('titleBold').checked ? '1' : '',
     sub_font:           document.getElementById('subFont').value,
+    sub_bold:           document.getElementById('subBold').checked ? '1' : '',
     sub_size:           document.getElementById('subSize').value,
     sub_color:          document.getElementById('subColor').value,
+    gpu_mode:           document.getElementById('gpuMode').value,
     sub_highlight_color:       document.getElementById('subHighlightColor').value,
     sub_highlight_text_color:  document.getElementById('subHighlightTextColor').value,
     sub_stroke_color:           document.getElementById('subStrokeColor').value,
@@ -396,7 +440,7 @@ function applyConfig(cfg) {
   const fields = {
     'titleText':'title_text','titleFont':'title_font','titleSize':'title_size',
     'titleColor':'title_color','titleStrokeColor':'title_stroke_color',
-    'titleX':'title_x','titleY':'title_y',
+    'titleX':'title_x','titleY':'title_y','titleBold':'title_bold',
     'subFont':'sub_font','subSize':'sub_size','subColor':'sub_color',
     'subHighlightColor':'sub_highlight_color',
     'subHighlightTextColor':'sub_highlight_text_color',
@@ -406,20 +450,30 @@ function applyConfig(cfg) {
     'subBgOpacity':'sub_bg_opacity','subY':'sub_y',
     'overlayX':'overlay_x','overlayY':'overlay_y',
     'overlayW':'overlay_w','overlayH':'overlay_h',
+    'gpuMode':'gpu_mode',
   };
   for (const [domId, cfgKey] of Object.entries(fields)) {
     const el = document.getElementById(domId);
-    if (el && cfg[cfgKey] !== undefined) el.value = cfg[cfgKey];
+    if (!el || cfg[cfgKey] === undefined) continue;
+    if (el.type === 'checkbox') {
+      el.checked = cfg[cfgKey] === '1' || cfg[cfgKey] === true;
+    } else {
+      el.value = cfg[cfgKey];
+    }
   }
   // update range sliders
   document.getElementById('titleSizeRange').value = cfg.title_size || 48;
   document.getElementById('subSizeRange').value = cfg.sub_size || 18;
+  document.getElementById('gpuMode').value = cfg.gpu_mode || 'cpu';
   document.getElementById('subYNum').value = cfg.sub_y || 30;
   // restore highlight / outline / background fields
   document.getElementById('subHighlightTextColor').value = cfg.sub_highlight_text_color || '#000000';
   document.getElementById('subOutlineW').value = cfg.sub_outline_w || 2;
   document.getElementById('subHlBox').value = cfg.sub_hl_box || 16;
   document.getElementById('subBgEnabled').checked = cfg.sub_bg_enabled === '1';
+  document.getElementById('titleBold').checked = cfg.title_bold === '1';
+  document.getElementById('subBold').checked = cfg.sub_bold === '1';
+  document.getElementById('gpuMode').value = cfg.gpu_mode || 'cpu';
   document.getElementById('subBgColor').value = cfg.sub_bg_color || '#000000';
   document.getElementById('subBgOpacity').value = cfg.sub_bg_opacity || 60;
   // update canvas positions
@@ -781,12 +835,24 @@ let canvasReady   = false; // true once first frame data is available
 let activeLayer   = 'overlay';
 
 // helper: read overlay W/H with natural-size fallback when fields are empty
+function parsePositiveInt(value, fallback) {
+  const n = parseInt(value);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
 function getOvWH() {
-  const wVal = parseInt(document.getElementById('overlayW').value);
-  const hVal = parseInt(document.getElementById('overlayH').value);
-  const w = (wVal > 0) ? wVal : (overlayImg ? overlayImg.naturalWidth  : 150);
-  const h = (hVal > 0) ? hVal : (overlayImg ? overlayImg.naturalHeight : 150);
+  const wVal = parsePositiveInt(document.getElementById('overlayW').value, NaN);
+  const hVal = parsePositiveInt(document.getElementById('overlayH').value, NaN);
+  const w = Number.isFinite(wVal) ? wVal : (overlayImg ? overlayImg.naturalWidth  : 150);
+  const h = Number.isFinite(hVal) ? hVal : (overlayImg ? overlayImg.naturalHeight : 150);
   return { w, h };
+}
+
+function updateOverlaySizeInputs(w, h) {
+  const wIn = document.getElementById('overlayW');
+  const hIn = document.getElementById('overlayH');
+  if (wIn) wIn.value = w;
+  if (hIn) hIn.value = h;
 }
 
 // pre-load existing overlay on page load
@@ -924,6 +990,14 @@ function drawFrame() {
     ctx.lineWidth = activeLayer === 'overlay' ? 3 : 2;
     ctx.setLineDash([6, 3]);
     ctx.strokeRect(overlayPos.x, overlayPos.y, c.ovW, c.ovH);
+    if (activeLayer === 'overlay') {
+      const handleSize = 14;
+      ctx.fillStyle = 'rgba(255,220,0,0.9)';
+      ctx.fillRect(overlayPos.x + c.ovW - handleSize, overlayPos.y + c.ovH - handleSize, handleSize, handleSize);
+      ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(overlayPos.x + c.ovW - handleSize, overlayPos.y + c.ovH - handleSize, handleSize, handleSize);
+    }
     ctx.restore();
   }
 
@@ -1111,6 +1185,13 @@ function hitOverlay(p) {
     p.x >= overlayPos.x && p.x <= overlayPos.x + c.ovW &&
     p.y >= overlayPos.y && p.y <= overlayPos.y + c.ovH;
 }
+function hitOverlayResize(p, c) {
+  if (activeLayer !== 'overlay') return false;
+  const handleSize = 14;
+  return overlayImg &&
+    p.x >= overlayPos.x + c.ovW - handleSize && p.x <= overlayPos.x + c.ovW &&
+    p.y >= overlayPos.y + c.ovH - handleSize && p.y <= overlayPos.y + c.ovH;
+}
 function hitTitle(p) {
   if (activeLayer !== 'title') return false;
   const c = getConf();
@@ -1127,7 +1208,11 @@ function hitSub(p) {
 
 canvas.addEventListener('mousedown', e => {
   const p = canvasPt(e);
-  if (activeLayer === 'overlay' && hitOverlay(p)) {
+  const c = getConf();
+  if (activeLayer === 'overlay' && hitOverlayResize(p, c)) {
+    dragging  = 'overlay-resize';
+    dragStart = { mx: p.x, my: p.y, ow: c.ovW, oh: c.ovH };
+  } else if (activeLayer === 'overlay' && hitOverlay(p)) {
     dragging  = 'overlay';
     dragStart = { mx: p.x, my: p.y, ox: overlayPos.x, oy: overlayPos.y };
   } else if (activeLayer === 'title' && hitTitle(p)) {
@@ -1137,19 +1222,42 @@ canvas.addEventListener('mousedown', e => {
     dragging  = 'sub';
     dragStart = { my: p.y, oy: subPos.y };
   }
-  if (dragging) canvas.style.cursor = 'grabbing';
+  if (dragging) canvas.style.cursor = dragging === 'overlay-resize' ? 'nwse-resize' : 'grabbing';
 });
 canvas.addEventListener('mousemove', e => {
   const p = canvasPt(e);
   if (!dragging) {
-    const hit = (activeLayer === 'overlay' && hitOverlay(p)) ||
+    const c = getConf();
+    const overHandle = activeLayer === 'overlay' && hitOverlayResize(p, c);
+    const hit = overHandle ||
+                (activeLayer === 'overlay' && hitOverlay(p)) ||
                 (activeLayer === 'title' && hitTitle(p)) ||
                 (activeLayer === 'sub' && hitSub(p));
-    canvas.style.cursor = hit ? 'grab' : 'crosshair';
+    canvas.style.cursor = overHandle ? 'nwse-resize' : hit ? 'grab' : 'crosshair';
     return;
   }
   const dx = p.x - (dragStart.mx || 0);
   const dy = p.y - dragStart.my;
+  if (dragging === 'overlay-resize') {
+    const lock = document.getElementById('lockAspect')?.checked;
+    let w = Math.max(10, Math.round(dragStart.ow + dx));
+    let h = Math.max(10, Math.round(dragStart.oh + dy));
+    if (lock && overlayAspect) {
+      if (Math.abs(dx) >= Math.abs(dy)) {
+        h = Math.max(10, Math.round(w / overlayAspect));
+      } else {
+        w = Math.max(10, Math.round(h * overlayAspect));
+      }
+    }
+    const maxW = Math.max(10, canvas.width - overlayPos.x);
+    const maxH = Math.max(10, canvas.height - overlayPos.y);
+    w = Math.min(w, maxW);
+    h = Math.min(h, maxH);
+    document.getElementById('overlayW').value = w;
+    document.getElementById('overlayH').value = h;
+    canvas.style.cursor = 'nwse-resize';
+    return;
+  }
   if (dragging === 'overlay') {
     overlayPos.x = Math.round(dragStart.ox + dx);
     overlayPos.y = Math.round(dragStart.oy + dy);
@@ -1201,12 +1309,16 @@ const lockAspect = document.getElementById('lockAspect');
 const overlayWIn = document.getElementById('overlayW');
 const overlayHIn = document.getElementById('overlayH');
 overlayWIn.addEventListener('input', () => {
-  if (lockAspect.checked && overlayAspect)
-    overlayHIn.value = Math.round(parseInt(overlayWIn.value) / overlayAspect);
+  const w = parsePositiveInt(overlayWIn.value, null);
+  if (lockAspect.checked && overlayAspect && w) {
+    overlayHIn.value = Math.round(w / overlayAspect);
+  }
 });
 overlayHIn.addEventListener('input', () => {
-  if (lockAspect.checked && overlayAspect)
-    overlayWIn.value = Math.round(parseInt(overlayHIn.value) * overlayAspect);
+  const h = parsePositiveInt(overlayHIn.value, null);
+  if (lockAspect.checked && overlayAspect && h) {
+    overlayWIn.value = Math.round(h * overlayAspect);
+  }
 });
 
 // ═══════════════════════════════════════════════
