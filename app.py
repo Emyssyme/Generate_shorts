@@ -57,6 +57,22 @@ def download_font_file(dest_path, url):
         return False
 
 
+def _add_common_linux_fonts(font_map):
+    candidates = [
+        ('Inter', '/usr/share/fonts/truetype/inter/Inter-Regular.ttf'),
+        ('Inter Bold', '/usr/share/fonts/truetype/inter/Inter-Bold.ttf'),
+        ('Inter', '/usr/share/fonts/truetype/Inter/Inter-Regular.ttf'),
+        ('Inter Bold', '/usr/share/fonts/truetype/Inter/Inter-Bold.ttf'),
+        ('Inter', '/usr/share/fonts/truetype/ttf-inter/Inter-Regular.ttf'),
+        ('Inter Bold', '/usr/share/fonts/truetype/ttf-inter/Inter-Bold.ttf'),
+        ('Inter', os.path.expanduser('~/.local/share/fonts/Inter-Regular.ttf')),
+        ('Inter Bold', os.path.expanduser('~/.local/share/fonts/Inter-Bold.ttf')),
+    ]
+    for name, path in candidates:
+        if os.path.exists(path):
+            font_map.setdefault(name, path)
+
+
 def ensure_default_fonts():
     for font_name, (filename, url) in FONT_DOWNLOAD_URLS.items():
         dest_path = os.path.join(FONTS_DIR, filename)
@@ -93,7 +109,7 @@ if not FONT_MAP:
             'Times New Roman': 'C:/Windows/Fonts/times.ttf',
             'Trebuchet MS':    'C:/Windows/Fonts/trebuc.ttf',
             'Calibri':         'C:/Windows/Fonts/calibri.ttf',
-            'Segoe UI':        'C:/Windows/Fonts/segoeui.ttf',
+            'Segoe UI':         'C:/Windows/Fonts/segoeui.ttf',
             'Comic Sans MS':   'C:/Windows/Fonts/comic.ttf',
         }
     else:
@@ -106,6 +122,34 @@ if not FONT_MAP:
             'FreeSerif':        '/usr/share/fonts/truetype/freefont/FreeSerif.ttf',
             'FreeSans':         '/usr/share/fonts/truetype/freefont/FreeSans.ttf',
         }
+        _add_common_linux_fonts(FONT_MAP)
+else:
+    # Add some common system fonts when we already have downloaded fonts,
+    # so the editor offers more fallback choices without overwriting Inter.
+    if sys.platform.startswith('win'):
+        FONT_MAP.update({
+            'Arial':           'C:/Windows/Fonts/arial.ttf',
+            'Arial Bold':      'C:/Windows/Fonts/arialbd.ttf',
+            'Impact':          'C:/Windows/Fonts/impact.ttf',
+            'Georgia':         'C:/Windows/Fonts/georgia.ttf',
+            'Verdana':         'C:/Windows/Fonts/verdana.ttf',
+            'Courier New':     'C:/Windows/Fonts/cour.ttf',
+            'Times New Roman': 'C:/Windows/Fonts/times.ttf',
+            'Trebuchet MS':    'C:/Windows/Fonts/trebuc.ttf',
+            'Calibri':         'C:/Windows/Fonts/calibri.ttf',
+            'Segoe UI':         'C:/Windows/Fonts/segoeui.ttf',
+            'Comic Sans MS':   'C:/Windows/Fonts/comic.ttf',
+        })
+    else:
+        FONT_MAP.update({
+            'DejaVu Sans':      '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+            'DejaVu Sans Bold': '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+            'Liberation Sans':  '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+            'Liberation Sans Bold': '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf',
+            'FreeSerif':        '/usr/share/fonts/truetype/freefont/FreeSerif.ttf',
+            'FreeSans':         '/usr/share/fonts/truetype/freefont/FreeSans.ttf',
+        })
+        _add_common_linux_fonts(FONT_MAP)
 
 # simple sqlite cache to avoid reprocessing identical url/time ranges
 CACHE_DB = os.path.join(BASE_DIR, "cache.db")
@@ -319,22 +363,8 @@ def save_jobs():
 active_jobs = load_jobs()
 
 # ---------------------------------------------------------------------------
-# Editor: font mapping (Windows system fonts) and colour helpers
+# Editor: colour helpers
 # ---------------------------------------------------------------------------
-FONT_MAP = {
-    'Arial':           'C:/Windows/Fonts/arial.ttf',
-    'Arial Bold':      'C:/Windows/Fonts/arialbd.ttf',
-    'Impact':          'C:/Windows/Fonts/impact.ttf',
-    'Georgia':         'C:/Windows/Fonts/georgia.ttf',
-    'Verdana':         'C:/Windows/Fonts/verdana.ttf',
-    'Courier New':     'C:/Windows/Fonts/cour.ttf',
-    'Times New Roman': 'C:/Windows/Fonts/times.ttf',
-    'Trebuchet MS':    'C:/Windows/Fonts/trebuc.ttf',
-    'Calibri':         'C:/Windows/Fonts/calibri.ttf',
-    'Segoe UI':        'C:/Windows/Fonts/segoeui.ttf',
-    'Comic Sans MS':   'C:/Windows/Fonts/comic.ttf',
-}
-
 
 def html_to_ass_color(html_color: str) -> str:
     """Convert #RRGGBB HTML colour to ASS &H00BBGGRR format."""
@@ -1130,6 +1160,13 @@ def editor(job_id):
     if 'base_video' not in job:
         job['base_video'] = job['video']
     base_video = job['base_video']
+
+    # default editor settings: Inter is the preferred font family
+    job.setdefault('title_font', 'Inter')
+    job.setdefault('sub_font', 'Inter')
+    job.setdefault('gpu_mode', 'cpu')
+    job.setdefault('title_bold', False)
+    job.setdefault('sub_bold', False)
 
     srt_path = os.path.join(DOWNLOADS_DIR, job.get('srt', ''))
     srt_text = ''
