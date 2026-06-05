@@ -40,12 +40,45 @@ FONTS_DIR = os.path.join(BASE_DIR, 'fonts')
 if not os.path.exists(FONTS_DIR):
     os.makedirs(FONTS_DIR)
 
+FONT_DOWNLOAD_URLS = {
+    'Inter':      ('Inter-Regular.ttf', 'https://github.com/rsms/inter/releases/download/v14.0/Inter-Regular.ttf'),
+    'Inter Bold': ('Inter-Bold.ttf',   'https://github.com/rsms/inter/releases/download/v14.0/Inter-Bold.ttf'),
+}
+
+def download_font_file(dest_path, url):
+    try:
+        response = requests.get(url, stream=True, timeout=30)
+        response.raise_for_status()
+        with open(dest_path, 'wb') as out_file:
+            shutil.copyfileobj(response.raw, out_file)
+        return True
+    except Exception as exc:
+        print(f"Warning: could not download font from {url}: {exc}")
+        return False
+
+
+def ensure_default_fonts():
+    for font_name, (filename, url) in FONT_DOWNLOAD_URLS.items():
+        dest_path = os.path.join(FONTS_DIR, filename)
+        if not os.path.exists(dest_path):
+            if download_font_file(dest_path, url):
+                print(f"Downloaded default font: {font_name}")
+
+ensure_default_fonts()
+
 # build font map from folder, fall back to Windows system fonts
 FONT_MAP = {}
 for fname in os.listdir(FONTS_DIR):
     if fname.lower().endswith(('.ttf', '.otf')):
         name = os.path.splitext(fname)[0]
-        FONT_MAP[name] = os.path.join(FONTS_DIR, fname)
+        path = os.path.join(FONTS_DIR, fname)
+        if name in ('Inter-Regular', 'Inter'):
+            FONT_MAP['Inter'] = path
+            continue
+        if name in ('Inter-Bold', 'InterBold'):
+            FONT_MAP['Inter Bold'] = path
+            continue
+        FONT_MAP[name] = path
 
 # default system fonts if folder is empty or missing entries
 if not FONT_MAP:
@@ -985,6 +1018,35 @@ VIDEO_QUALITY = [
     '-pix_fmt', 'yuv420p', '-movflags', '+faststart'
 ]
 
+GPU_ENCODER_QUALITY = {
+    'h264_nvenc': [
+        '-c:v', 'h264_nvenc', '-rc:v', 'vbr_hq', '-cq:v', '18',
+        '-g', '30', '-keyint_min', '30', '-sc_threshold', '0',
+        '-pix_fmt', 'yuv420p', '-movflags', '+faststart'
+    ],
+    'hevc_nvenc': [
+        '-c:v', 'hevc_nvenc', '-rc:v', 'vbr_hq', '-cq:v', '18',
+        '-g', '30', '-keyint_min', '30', '-sc_threshold', '0',
+        '-pix_fmt', 'yuv420p', '-movflags', '+faststart'
+    ],
+}
+
+FFMPEG_ENCODER_CACHE = {}
+
+def ffmpeg_supports_encoder(name):
+    if name in FFMPEG_ENCODER_CACHE:
+        return FFMPEG_ENCODER_CACHE[name]
+    try:
+        result = subprocess.run(
+            ['ffmpeg', '-hide_banner', '-encoders'],
+            capture_output=True, text=True, timeout=15
+        )
+        supported = name in result.stdout
+    except Exception as exc:
+        print(f"Warning: ffmpeg encoder probe failed for {name}: {exc}")
+        supported = False
+    FFMPEG_ENCODER_CACHE[name] = supported
+    return supported
 
 
 @app.route('/')
@@ -1108,13 +1170,16 @@ def editor(job_id):
 
         # ── collect all styling fields ────────────────────────────────────
         title_text   = request.form.get('title_text', '').strip()
-        title_font   = request.form.get('title_font', 'Arial')
+        title_font   = request.form.get('title_font', 'Inter')
+        title_bold   = request.form.get('title_bold') == '1'
         title_color  = request.form.get('title_color', '#ffffff')
         title_stroke = request.form.get('title_stroke_color', '#000000')
         title_size   = request.form.get('title_size', '48')
         title_x      = request.form.get('title_x', '10')
         title_y      = request.form.get('title_y', '80')
-        sub_font     = request.form.get('sub_font', 'Arial')
+        sub_font     = request.form.get('sub_font', 'Inter')
+        sub_bold     = request.form.get('sub_bold') == '1'
+        gpu_mode     = request.form.get('gpu_mode', 'cpu')
         sub_color    = request.form.get('sub_color', '#ffffff')
         sub_highlight_color = request.form.get('sub_highlight_color', '#ffff00')
         sub_highlight_text_color = request.form.get('sub_highlight_text_color', '#000000')
@@ -1136,9 +1201,12 @@ def editor(job_id):
 
         job.update({
             'title_text': title_text,   'title_font': title_font,
-            'title_color': title_color, 'title_stroke_color': title_stroke,
+            'title_bold': title_bold,   'title_color': title_color,
+            'title_stroke_color': title_stroke,
             'title_size': title_size,   'title_x': title_x, 'title_y': title_y,
-            'sub_font': sub_font,       'sub_color': sub_color,
+            'sub_font': sub_font,       'sub_bold': sub_bold,
+            'gpu_mode': gpu_mode,
+            'sub_color': sub_color,
             'sub_highlight_color': sub_highlight_color,
             'sub_highlight_text_color': sub_highlight_text_color,
             'sub_stroke_color': sub_stroke, 'sub_size': sub_size, 'sub_y': sub_y,
@@ -1216,6 +1284,10 @@ def editor(job_id):
         # filters applied after optional overlay compositing
         vf_parts = []
 
+        effective_sub_font = sub_font
+        if sub_bold and not effective_sub_font.endswith(' Bold'):
+            effective_sub_font = f"{effective_sub_font} Bold"
+
         if has_srt:
             # Use ASS file for word-level background-highlight when available
             ass_name = job.get('ass', '')
@@ -1254,7 +1326,7 @@ def editor(job_id):
                     ass_alpha = format(int(255 * (1 - int(sub_bg_opacity) / 100)), '02X')
                     bg_ass = f"&H{ass_alpha}" + html_to_ass_color(sub_bg_color)[3:]  # strip &H00, prepend alpha
                     sub_style = (
-                        f"FontName={sub_font},FontSize={sub_size},"
+                        f"FontName={effective_sub_font},FontSize={sub_size},"
                         f"PrimaryColour={html_to_ass_color(sub_color)},"
                         f"OutlineColour={html_to_ass_color(sub_stroke)},"
                         f"BackColour={bg_ass},"
@@ -1263,7 +1335,7 @@ def editor(job_id):
                     )
                 else:
                     sub_style = (
-                        f"FontName={sub_font},FontSize={sub_size},"
+                        f"FontName={effective_sub_font},FontSize={sub_size},"
                         f"PrimaryColour={html_to_ass_color(sub_color)},"
                         f"OutlineColour={html_to_ass_color(sub_stroke)},"
                         f"Outline={sub_outline_w},Alignment=2,MarginV={sub_y}"
@@ -1276,7 +1348,7 @@ def editor(job_id):
                     ass_alpha = format(int(255 * (1 - int(sub_bg_opacity) / 100)), '02X')
                     bg_ass = f"&H{ass_alpha}" + html_to_ass_color(sub_bg_color)[3:]
                     sub_style = (
-                        f"FontName={sub_font},FontSize={sub_size},"
+                        f"FontName={effective_sub_font},FontSize={sub_size},"
                         f"PrimaryColour={html_to_ass_color(sub_color)},"
                         f"OutlineColour={html_to_ass_color(sub_stroke)},"
                         f"BackColour={bg_ass},"
@@ -1285,7 +1357,7 @@ def editor(job_id):
                     )
                 else:
                     sub_style = (
-                        f"FontName={sub_font},FontSize={sub_size},"
+                        f"FontName={effective_sub_font},FontSize={sub_size},"
                         f"PrimaryColour={html_to_ass_color(sub_color)},"
                         f"OutlineColour={html_to_ass_color(sub_stroke)},"
                         f"Outline={sub_outline_w},Alignment=2,MarginV={sub_y}"
@@ -1293,7 +1365,10 @@ def editor(job_id):
                 vf_parts.append(f"subtitles='{srt_abs}':force_style='{sub_style}'")
 
         if has_title:
-            font_file = FONT_MAP.get(title_font, 'C:/Windows/Fonts/arial.ttf')
+            effective_title_font = title_font
+            if title_bold and not effective_title_font.endswith(' Bold'):
+                effective_title_font = f"{effective_title_font} Bold"
+            font_file = FONT_MAP.get(effective_title_font) or FONT_MAP.get(title_font) or 'C:/Windows/Fonts/arial.ttf'
             font_esc  = font_file.replace(':', '\\:')
             # Write title text to a UTF-8 file so drawtext handles any Unicode
             # (Romanian diacritics, etc.) without encoding issues on Windows.
@@ -1319,6 +1394,15 @@ def editor(job_id):
         fc_script_name = f"job_{job_id}_fc.txt"
         fc_script_path = os.path.join(DOWNLOADS_DIR, fc_script_name)
 
+        render_quality = VIDEO_QUALITY
+        if gpu_mode in GPU_ENCODER_QUALITY:
+            if ffmpeg_supports_encoder(gpu_mode):
+                render_quality = GPU_ENCODER_QUALITY[gpu_mode]
+                update_job(job_id, log=f"using GPU encoder {gpu_mode}")
+            else:
+                update_job(job_id, log=f"GPU encoder {gpu_mode} unavailable, falling back to CPU")
+                flash('Requested GPU render mode unavailable; using CPU encoder instead.', 'warning')
+
         if has_overlay:
             ov_scale = f"[1:v]scale={overlay_w}:{overlay_h}[ov]"
             if vf_parts:
@@ -1343,7 +1427,7 @@ def editor(job_id):
                 '-i', orig_video, '-i', overlay_path,
                 '-filter_complex_script', fc_script_name,
                 '-map', out_label, '-map', '0:a?',
-                *VIDEO_QUALITY, '-c:a', 'copy', new_video_name,
+                *render_quality, '-c:a', 'copy', new_video_name,
             ]
         elif vf_parts:
             vf_chain = ','.join(vf_parts)
@@ -1355,11 +1439,11 @@ def editor(job_id):
                 'ffmpeg', '-nostdin', '-y', '-i', orig_video,
                 '-filter_complex_script', fc_script_name,
                 '-map', '[vout]', '-map', '0:a?',
-                *VIDEO_QUALITY, '-c:a', 'copy', new_video_name,
+                *render_quality, '-c:a', 'copy', new_video_name,
             ]
         else:
             cmd = ['ffmpeg', '-nostdin', '-y', '-i', orig_video,
-                   *VIDEO_QUALITY, '-c:a', 'copy', new_video_name]
+                   *render_quality, '-c:a', 'copy', new_video_name]
 
         update_job(job_id, log=f"ffmpeg: {' '.join(cmd)}")
         result = subprocess.run(cmd, cwd=DOWNLOADS_DIR, capture_output=True, text=True)
@@ -1380,8 +1464,12 @@ def editor(job_id):
 
         return redirect(url_for('editor', job_id=job_id))
 
+    sorted_fonts = sorted(
+        FONT_MAP.keys(),
+        key=lambda name: (0 if name == 'Inter' else 1 if name == 'Inter Bold' else 2, name)
+    )
     return render_template('editor.html', job=job, srt_content=srt_text,
-                           job_key=job_id, font_list=list(FONT_MAP.keys()),
+                           job_key=job_id, font_list=sorted_fonts,
                            templates=get_all_templates())
 
 
