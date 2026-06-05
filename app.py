@@ -44,6 +44,11 @@ FONT_DOWNLOAD_URLS = {
     'Inter':      ('Inter-Regular.ttf', 'https://github.com/rsms/inter/releases/download/v14.0/Inter-Regular.ttf'),
     'Inter Bold': ('Inter-Bold.ttf',   'https://github.com/rsms/inter/releases/download/v14.0/Inter-Bold.ttf'),
 }
+ALLOWED_FONT_EXTENSIONS = {'ttf', 'otf'}
+
+def allowed_font_file(filename):
+    ext = os.path.splitext(filename)[1].lower().lstrip('.')
+    return ext in ALLOWED_FONT_EXTENSIONS
 
 def download_font_file(dest_path, url):
     try:
@@ -73,6 +78,70 @@ def _add_common_linux_fonts(font_map):
             font_map.setdefault(name, path)
 
 
+def build_font_map():
+    font_map = {}
+    if os.path.isdir(FONTS_DIR):
+        for fname in os.listdir(FONTS_DIR):
+            if fname.lower().endswith(('.ttf', '.otf')):
+                name = os.path.splitext(fname)[0]
+                path = os.path.join(FONTS_DIR, fname)
+                if name in ('Inter-Regular', 'Inter'):
+                    font_map['Inter'] = path
+                    continue
+                if name in ('Inter-Bold', 'InterBold'):
+                    font_map['Inter Bold'] = path
+                    continue
+                font_map[name] = path
+    if not font_map:
+        if sys.platform.startswith('win'):
+            font_map = {
+                'Arial':           'C:/Windows/Fonts/arial.ttf',
+                'Arial Bold':      'C:/Windows/Fonts/arialbd.ttf',
+                'Impact':          'C:/Windows/Fonts/impact.ttf',
+                'Georgia':         'C:/Windows/Fonts/georgia.ttf',
+                'Verdana':         'C:/Windows/Fonts/verdana.ttf',
+                'Courier New':     'C:/Windows/Fonts/cour.ttf',
+                'Times New Roman': 'C:/Windows/Fonts/times.ttf',
+                'Trebuchet MS':    'C:/Windows/Fonts/trebuc.ttf',
+                'Calibri':         'C:/Windows/Fonts/calibri.ttf',
+                'Segoe UI':        'C:/Windows/Fonts/segoeui.ttf',
+                'Comic Sans MS':   'C:/Windows/Fonts/comic.ttf',
+            }
+        else:
+            font_map = {
+                'DejaVu Sans':      '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+                'DejaVu Sans Bold': '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+                'Liberation Sans':  '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+                'Liberation Sans Bold': '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf',
+                'FreeSerif':        '/usr/share/fonts/truetype/freefont/FreeSerif.ttf',
+                'FreeSans':         '/usr/share/fonts/truetype/freefont/FreeSans.ttf',
+            }
+            _add_common_linux_fonts(font_map)
+    else:
+        if sys.platform.startswith('win'):
+            font_map.update({
+                'Arial':           'C:/Windows/Fonts/arial.ttf',
+                'Arial Bold':      'C:/Windows/Fonts/arialbd.ttf',
+                'Impact':          'C:/Windows/Fonts/impact.ttf',
+                'Georgia':         'C:/Windows/Fonts/georgia.ttf',
+                'Verdana':         'C:/Windows/Fonts/verdana.ttf',
+                'Courier New':     'C:/Windows/Fonts/cour.ttf',
+                'Times New Roman': 'C:/Windows/Fonts/times.ttf',
+                'Trebuchet MS':    'C:/Windows/Fonts/trebuc.ttf',
+                'Calibri':         'C:/Windows/Fonts/calibri.ttf',
+                'Segoe UI':        'C:/Windows/Fonts/segoeui.ttf',
+                'Comic Sans MS':   'C:/Windows/Fonts/comic.ttf',
+            })
+        else:
+            _add_common_linux_fonts(font_map)
+    return font_map
+
+
+def refresh_font_map():
+    global FONT_MAP
+    FONT_MAP = build_font_map()
+
+
 def ensure_default_fonts():
     for font_name, (filename, url) in FONT_DOWNLOAD_URLS.items():
         dest_path = os.path.join(FONTS_DIR, filename)
@@ -81,75 +150,7 @@ def ensure_default_fonts():
                 print(f"Downloaded default font: {font_name}")
 
 ensure_default_fonts()
-
-# build font map from folder, fall back to Windows system fonts
-FONT_MAP = {}
-for fname in os.listdir(FONTS_DIR):
-    if fname.lower().endswith(('.ttf', '.otf')):
-        name = os.path.splitext(fname)[0]
-        path = os.path.join(FONTS_DIR, fname)
-        if name in ('Inter-Regular', 'Inter'):
-            FONT_MAP['Inter'] = path
-            continue
-        if name in ('Inter-Bold', 'InterBold'):
-            FONT_MAP['Inter Bold'] = path
-            continue
-        FONT_MAP[name] = path
-
-# default system fonts if folder is empty or missing entries
-if not FONT_MAP:
-    if sys.platform.startswith('win'):
-        FONT_MAP = {
-            'Arial':           'C:/Windows/Fonts/arial.ttf',
-            'Arial Bold':      'C:/Windows/Fonts/arialbd.ttf',
-            'Impact':          'C:/Windows/Fonts/impact.ttf',
-            'Georgia':         'C:/Windows/Fonts/georgia.ttf',
-            'Verdana':         'C:/Windows/Fonts/verdana.ttf',
-            'Courier New':     'C:/Windows/Fonts/cour.ttf',
-            'Times New Roman': 'C:/Windows/Fonts/times.ttf',
-            'Trebuchet MS':    'C:/Windows/Fonts/trebuc.ttf',
-            'Calibri':         'C:/Windows/Fonts/calibri.ttf',
-            'Segoe UI':         'C:/Windows/Fonts/segoeui.ttf',
-            'Comic Sans MS':   'C:/Windows/Fonts/comic.ttf',
-        }
-    else:
-        # common Linux fonts
-        FONT_MAP = {
-            'DejaVu Sans':      '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-            'DejaVu Sans Bold': '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
-            'Liberation Sans':  '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
-            'Liberation Sans Bold': '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf',
-            'FreeSerif':        '/usr/share/fonts/truetype/freefont/FreeSerif.ttf',
-            'FreeSans':         '/usr/share/fonts/truetype/freefont/FreeSans.ttf',
-        }
-        _add_common_linux_fonts(FONT_MAP)
-else:
-    # Add some common system fonts when we already have downloaded fonts,
-    # so the editor offers more fallback choices without overwriting Inter.
-    if sys.platform.startswith('win'):
-        FONT_MAP.update({
-            'Arial':           'C:/Windows/Fonts/arial.ttf',
-            'Arial Bold':      'C:/Windows/Fonts/arialbd.ttf',
-            'Impact':          'C:/Windows/Fonts/impact.ttf',
-            'Georgia':         'C:/Windows/Fonts/georgia.ttf',
-            'Verdana':         'C:/Windows/Fonts/verdana.ttf',
-            'Courier New':     'C:/Windows/Fonts/cour.ttf',
-            'Times New Roman': 'C:/Windows/Fonts/times.ttf',
-            'Trebuchet MS':    'C:/Windows/Fonts/trebuc.ttf',
-            'Calibri':         'C:/Windows/Fonts/calibri.ttf',
-            'Segoe UI':         'C:/Windows/Fonts/segoeui.ttf',
-            'Comic Sans MS':   'C:/Windows/Fonts/comic.ttf',
-        })
-    else:
-        FONT_MAP.update({
-            'DejaVu Sans':      '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-            'DejaVu Sans Bold': '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
-            'Liberation Sans':  '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
-            'Liberation Sans Bold': '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf',
-            'FreeSerif':        '/usr/share/fonts/truetype/freefont/FreeSerif.ttf',
-            'FreeSans':         '/usr/share/fonts/truetype/freefont/FreeSans.ttf',
-        })
-        _add_common_linux_fonts(FONT_MAP)
+refresh_font_map()
 
 # simple sqlite cache to avoid reprocessing identical url/time ranges
 CACHE_DB = os.path.join(BASE_DIR, "cache.db")
@@ -1063,6 +1064,13 @@ GPU_ENCODER_QUALITY = {
 
 FFMPEG_ENCODER_CACHE = {}
 
+def select_auto_gpu_encoder():
+    """Return the first supported GPU encoder, or None if none are available."""
+    for encoder in GPU_ENCODER_QUALITY:
+        if ffmpeg_supports_encoder(encoder):
+            return encoder
+    return None
+
 def ffmpeg_supports_encoder(name):
     if name in FFMPEG_ENCODER_CACHE:
         return FFMPEG_ENCODER_CACHE[name]
@@ -1164,7 +1172,7 @@ def editor(job_id):
     # default editor settings: Inter is the preferred font family
     job.setdefault('title_font', 'Inter')
     job.setdefault('sub_font', 'Inter')
-    job.setdefault('gpu_mode', 'cpu')
+    job.setdefault('gpu_mode', 'auto')
     job.setdefault('title_bold', False)
     job.setdefault('sub_bold', False)
 
@@ -1223,7 +1231,7 @@ def editor(job_id):
         title_y      = parse_int_field(request.form.get('title_y', '80'), 80)
         sub_font     = request.form.get('sub_font', 'Inter')
         sub_bold     = request.form.get('sub_bold') == '1'
-        gpu_mode     = request.form.get('gpu_mode', 'cpu')
+        gpu_mode     = request.form.get('gpu_mode', 'auto')
         sub_color    = request.form.get('sub_color', '#ffffff')
         sub_highlight_color = request.form.get('sub_highlight_color', '#ffff00')
         sub_highlight_text_color = request.form.get('sub_highlight_text_color', '#000000')
@@ -1263,6 +1271,26 @@ def editor(job_id):
             'overlay_w': overlay_w,    'overlay_h': overlay_h,
             'preview_w': prev_w, 'preview_h': prev_h,
         })
+
+        # ── download or upload fonts ────────────────────────────────────────
+        font_file = request.files.get('font_file')
+        if font_file and font_file.filename:
+            safe_name = os.path.basename(font_file.filename)
+            if allowed_font_file(safe_name):
+                dest_path = os.path.join(FONTS_DIR, safe_name)
+                font_file.save(dest_path)
+                refresh_font_map()
+                flash(f"Font uploaded: {safe_name}", 'success')
+            else:
+                flash('Font upload failed: only .ttf and .otf files are allowed.', 'danger')
+
+        if request.form.get('download_fonts') == '1':
+            ensure_default_fonts()
+            refresh_font_map()
+            save_jobs()
+            flash('Downloaded missing Inter fonts to the fonts folder.', 'success')
+            return redirect(url_for('editor', job_id=job_id))
+
         # ── handle overlay upload ─────────────────────────────────────────
         overlay_file = request.files.get('overlay')
         if overlay_file and overlay_file.filename:
@@ -1439,7 +1467,15 @@ def editor(job_id):
         fc_script_path = os.path.join(DOWNLOADS_DIR, fc_script_name)
 
         render_quality = VIDEO_QUALITY
-        if gpu_mode in GPU_ENCODER_QUALITY:
+        if gpu_mode == 'auto':
+            selected_gpu = select_auto_gpu_encoder()
+            if selected_gpu:
+                render_quality = GPU_ENCODER_QUALITY[selected_gpu]
+                update_job(job_id, log=f"auto GPU mode selected {selected_gpu}")
+            else:
+                update_job(job_id, log="auto GPU mode selected but no supported encoder found, using CPU")
+                flash('No supported GPU encoder found; using CPU encoder instead.', 'warning')
+        elif gpu_mode in GPU_ENCODER_QUALITY:
             if ffmpeg_supports_encoder(gpu_mode):
                 render_quality = GPU_ENCODER_QUALITY[gpu_mode]
                 update_job(job_id, log=f"using GPU encoder {gpu_mode}")
