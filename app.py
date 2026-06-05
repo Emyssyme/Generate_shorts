@@ -1169,14 +1169,21 @@ def editor(job_id):
                 job.pop('ass', None)
 
         # ── collect all styling fields ────────────────────────────────────
+        def parse_int_field(value, default):
+            try:
+                iv = int(float(value))
+                return str(max(1, iv))
+            except Exception:
+                return str(default)
+
         title_text   = request.form.get('title_text', '').strip()
         title_font   = request.form.get('title_font', 'Inter')
         title_bold   = request.form.get('title_bold') == '1'
         title_color  = request.form.get('title_color', '#ffffff')
         title_stroke = request.form.get('title_stroke_color', '#000000')
-        title_size   = request.form.get('title_size', '48')
-        title_x      = request.form.get('title_x', '10')
-        title_y      = request.form.get('title_y', '80')
+        title_size   = parse_int_field(request.form.get('title_size', '48'), 48)
+        title_x      = parse_int_field(request.form.get('title_x', '10'), 10)
+        title_y      = parse_int_field(request.form.get('title_y', '80'), 80)
         sub_font     = request.form.get('sub_font', 'Inter')
         sub_bold     = request.form.get('sub_bold') == '1'
         gpu_mode     = request.form.get('gpu_mode', 'cpu')
@@ -1184,17 +1191,17 @@ def editor(job_id):
         sub_highlight_color = request.form.get('sub_highlight_color', '#ffff00')
         sub_highlight_text_color = request.form.get('sub_highlight_text_color', '#000000')
         sub_stroke   = request.form.get('sub_stroke_color', '#000000')
-        sub_size     = request.form.get('sub_size', '18')
-        sub_y        = request.form.get('sub_y', job.get('sub_y', '30'))
-        sub_outline_w = request.form.get('sub_outline_w', '2')
-        sub_hl_box    = request.form.get('sub_hl_box', '16')
+        sub_size     = parse_int_field(request.form.get('sub_size', '18'), 18)
+        sub_y        = parse_int_field(request.form.get('sub_y', job.get('sub_y', '30')), 30)
+        sub_outline_w = parse_int_field(request.form.get('sub_outline_w', '2'), 2)
+        sub_hl_box    = parse_int_field(request.form.get('sub_hl_box', '16'), 16)
         sub_bg_enabled = request.form.get('sub_bg_enabled') == '1'
         sub_bg_color = request.form.get('sub_bg_color', '#000000')
-        sub_bg_opacity = request.form.get('sub_bg_opacity', '60')
-        overlay_x    = request.form.get('overlay_x', job.get('overlay_x', '10'))
-        overlay_y    = request.form.get('overlay_y', job.get('overlay_y', '10'))
-        overlay_w    = request.form.get('overlay_w', job.get('overlay_w', '150'))
-        overlay_h    = request.form.get('overlay_h', job.get('overlay_h', '150'))
+        sub_bg_opacity = parse_int_field(request.form.get('sub_bg_opacity', '60'), 60)
+        overlay_x    = parse_int_field(request.form.get('overlay_x', job.get('overlay_x', '10')), 10)
+        overlay_y    = parse_int_field(request.form.get('overlay_y', job.get('overlay_y', '10')), 10)
+        overlay_w    = parse_int_field(request.form.get('overlay_w', job.get('overlay_w', '150')), 150)
+        overlay_h    = parse_int_field(request.form.get('overlay_h', job.get('overlay_h', '150')), 150)
         # preview dimensions used for scaling
         prev_w       = float(request.form.get('preview_w') or 0)
         prev_h       = float(request.form.get('preview_h') or 0)
