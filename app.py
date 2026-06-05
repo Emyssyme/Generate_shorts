@@ -1033,6 +1033,13 @@ def preview_file(filename):
     return '', 404
 
 
+@app.route('/fonts/<path:filename>')
+@login_required
+def serve_font(filename):
+    """Serve font files from the fonts directory for browser preview."""
+    return send_from_directory(FONTS_DIR, filename, as_attachment=False)
+
+
 # High-quality encoding flags reused across all editor render commands.
 # The previous CRF 18/slow produced decent results but users complained about
 # poor quality; bump CRF to 14 and use a slower preset to maximise fidelity.
@@ -1051,12 +1058,12 @@ VIDEO_QUALITY = [
 
 GPU_ENCODER_QUALITY = {
     'h264_nvenc': [
-        '-c:v', 'h264_nvenc', '-rc:v', 'vbr_hq', '-cq:v', '18',
+        '-c:v', 'h264_nvenc', '-rc:v', 'vbr', '-cq:v', '18',
         '-g', '30', '-keyint_min', '30', '-sc_threshold', '0',
         '-pix_fmt', 'yuv420p', '-movflags', '+faststart'
     ],
     'hevc_nvenc': [
-        '-c:v', 'hevc_nvenc', '-rc:v', 'vbr_hq', '-cq:v', '18',
+        '-c:v', 'hevc_nvenc', '-rc:v', 'vbr', '-cq:v', '18',
         '-g', '30', '-keyint_min', '30', '-sc_threshold', '0',
         '-pix_fmt', 'yuv420p', '-movflags', '+faststart'
     ],
@@ -1503,7 +1510,7 @@ def editor(job_id):
                 _fc.write(fc)
             update_job(job_id, log=f"filter_complex (overlay): {fc}")
             cmd = [
-                'ffmpeg', '-nostdin', '-y',
+                'ffmpeg', '-nostdin', '-y', '-fontsdir', FONTS_DIR,
                 '-i', orig_video, '-i', overlay_path,
                 '-filter_complex_script', fc_script_name,
                 '-map', out_label, '-map', '0:a?',
@@ -1516,13 +1523,15 @@ def editor(job_id):
                 _fc.write(fc)
             update_job(job_id, log=f"filter_complex (no overlay): {fc}")
             cmd = [
-                'ffmpeg', '-nostdin', '-y', '-i', orig_video,
+                'ffmpeg', '-nostdin', '-y', '-fontsdir', FONTS_DIR,
+                '-i', orig_video,
                 '-filter_complex_script', fc_script_name,
                 '-map', '[vout]', '-map', '0:a?',
                 *render_quality, '-c:a', 'copy', new_video_name,
             ]
         else:
-            cmd = ['ffmpeg', '-nostdin', '-y', '-i', orig_video,
+            cmd = ['ffmpeg', '-nostdin', '-y', '-fontsdir', FONTS_DIR,
+                   '-i', orig_video,
                    *render_quality, '-c:a', 'copy', new_video_name]
 
         update_job(job_id, log=f"ffmpeg: {' '.join(cmd)}")
@@ -1548,8 +1557,25 @@ def editor(job_id):
         FONT_MAP.keys(),
         key=lambda name: (0 if name == 'Inter' else 1 if name == 'Inter Bold' else 2, name)
     )
+    font_faces = []
+    fonts_dir_abs = os.path.abspath(FONTS_DIR)
+    for font_name, font_path in FONT_MAP.items():
+        abs_path = os.path.abspath(font_path)
+        if not abs_path.startswith(fonts_dir_abs):
+            continue
+        font_file = os.path.basename(abs_path)
+        if not font_file:
+            continue
+        ext = os.path.splitext(font_file)[1].lower()
+        font_fmt = 'opentype' if ext == '.otf' else 'truetype'
+        font_faces.append({
+            'name': font_name,
+            'url': url_for('serve_font', filename=font_file),
+            'format': font_fmt,
+        })
     return render_template('editor.html', job=job, srt_content=srt_text,
                            job_key=job_id, font_list=sorted_fonts,
+                           font_faces=font_faces,
                            templates=get_all_templates())
 
 

@@ -1,6 +1,15 @@
 {% extends "base.html" %}
 {% block content %}
 <style>
+{% for font in font_faces %}
+  @font-face {
+    font-family: "{{ font.name }}";
+    src: url("{{ font.url }}") format("{{ font.format }}");
+    font-weight: normal;
+    font-style: normal;
+    font-display: swap;
+  }
+{% endfor %}
   #previewCanvas { display:block; width:100%; height:auto; max-height:70vh; background:#000; border-radius:10px; cursor:crosshair; border:1px solid var(--border); object-fit:contain; }
   .tab-content.bordered { border:1px solid var(--border); border-top:none; border-radius:0 0 10px 10px; background:var(--surface); }
   .form-control-color { height:40px; padding:3px 5px; min-width:60px; }
@@ -950,10 +959,12 @@ function getConf() {
   return {
     titleText:   document.getElementById('titleText').value,
     titleFont:   document.getElementById('titleFont').value,
+    titleBold:   document.getElementById('titleBold')?.checked || false,
     titleSize:   parseInt(document.getElementById('titleSize').value)   || 48,
     titleColor:  document.getElementById('titleColor').value,
     titleStroke: document.getElementById('titleStrokeColor').value,
     subFont:     document.getElementById('subFont').value,
+    subBold:     document.getElementById('subBold')?.checked || false,
     subSize:     parseInt(document.getElementById('subSize').value)     || 18,
     subColor:    document.getElementById('subColor').value,
     subHighlightBg: document.getElementById('subHighlightColor').value,
@@ -1004,7 +1015,7 @@ function drawFrame() {
   // ── title text ───────────────────────────────────────────────────────
   if (c.titleText) {
     ctx.save();
-    ctx.font      = `bold ${c.titleSize}px "${c.titleFont}", sans-serif`;
+    ctx.font      = `${c.titleBold ? 'bold' : 'normal'} ${c.titleSize}px "${c.titleFont}", sans-serif`;
     ctx.lineWidth = Math.max(1, c.titleSize / 14);
     ctx.strokeStyle = c.titleStroke;
     ctx.strokeText(c.titleText, titlePos.x, titlePos.y);
@@ -1064,7 +1075,7 @@ function drawFrame() {
     const lines = sub.text.split('\n');
     const lh    = c.subSize * 1.4;
     ctx.save();
-    ctx.font      = `bold ${c.subSize}px "${c.subFont}", sans-serif`;
+    ctx.font      = `${c.subBold ? 'bold' : 'normal'} ${c.subSize}px "${c.subFont}", sans-serif`;
     ctx.textAlign = 'left';
     ctx.lineWidth = c.subOutlineW;
     const cx = canvas.width / 2;
