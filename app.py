@@ -654,14 +654,55 @@ def run_crop(input_video, output_dir, overlay=None, job_id=None):
     browsers often cannot decode (hence the preview would show only audio).
     After the helper finishes we transcode the result to h264 so the HTML5
     <video> element can play it reliably.
+    
+    Falls back to CPU-only mode if GPU acceleration fails.
     """
     script = find_script("_crop_face_vertical.py")
-    cmd = [sys.executable, script, "--input", input_video, "--output", output_dir]
-    if overlay:
-        cmd.extend(["--overlay", overlay])
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-    if result.returncode != 0:
-        raise RuntimeError(f"crop failed: {result.stderr}")
+    
+    # Try with GPU first if available, then fallback to CPU
+    for use_gpu in [True, False]:
+        if use_gpu and not GPU_AVAILABLE:
+            continue  # Skip GPU attempt if no GPU detected
+            
+        cmd = [sys.executable, script, "--input", input_video, "--output", output_dir]
+        if overlay:
+            cmd.extend(["--overlay", overlay])
+        if not use_gpu:
+            cmd.append("--cpu-only")  # Pass CPU-only flag to helper script
+        
+        try:
+            if job_id and use_gpu:
+                update_job(job_id, log="attempting crop with GPU acceleration")
+            elif job_id and not use_gpu:
+                update_job(job_id, log="attempting crop with CPU only")
+                
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            
+            if result.returncode != 0:
+                error_msg = result.stderr
+                if "DNN_BACKEND_CUDA" in error_msg or "CUDA" in error_msg:
+                    # GPU-related error, try again with CPU
+                    if use_gpu:
+                        if job_id:
+                            update_job(job_id, log="GPU acceleration not available, retrying with CPU")
+                        continue  # Try again with use_gpu=False
+                    else:
+                        # Already tried CPU, this is a real error
+                        raise RuntimeError(f"crop failed: {error_msg}")
+                else:
+                    raise RuntimeError(f"crop failed: {error_msg}")
+            
+            # Success - process the output
+            break  # Exit retry loop on success
+            
+        except subprocess.TimeoutExpired:
+            if use_gpu and GPU_AVAILABLE:
+                if job_id:
+                    update_job(job_id, log="GPU crop timed out, retrying with CPU")
+                continue  # Try again with CPU
+            else:
+                raise RuntimeError("crop script timed out after 10 minutes")
+    
     # script names output as <basename>_processed.mp4
     base = os.path.splitext(os.path.basename(input_video))[0]
     cropped = os.path.join(output_dir, base + "_processed.mp4")
@@ -1103,6 +1144,24 @@ GPU_ENCODER_QUALITY = {
 
 FFMPEG_ENCODER_CACHE = {}
 
+def detect_gpu_available():
+    """Detect if GPU/CUDA is available for accelerated processing."""
+    try:
+        result = subprocess.run(
+            ['nvidia-smi', '--query-gpu=name', '--format=csv,noheader'],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            gpu_name = result.stdout.strip().split('\n')[0]
+            print(f"GPU detected: {gpu_name}")
+            return True
+    except Exception:
+        pass
+    print("No GPU detected; using CPU")
+    return False
+
+GPU_AVAILABLE = detect_gpu_available()
+
 def select_auto_gpu_encoder():
     """Return the first supported GPU encoder, or None if none are available."""
     for encoder in GPU_ENCODER_QUALITY:
@@ -1167,7 +1226,33 @@ def delete_project(job_id):
 #  Template / Preset API – save & restore editor layer configurations
 # ═══════════════════════════════════════════════════════════════════════════
 
-@app.route('/api/templates', methods=['GET'])
+@app.route('/api/system-info')
+@login_required
+def api_system_info():
+    """Return system information including GPU availability."""
+    gpu_info = {
+        'available': GPU_AVAILABLE,
+        'gpu_encoder': select_auto_gpu_encoder() or 'none'
+    }
+    
+    # Try to get GPU name
+    try:
+        result = subprocess.run(
+            ['nvidia-smi', '--query-gpu=name', '--format=csv,noheader'],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            gpu_info['gpu_name'] = result.stdout.strip().split('\n')[0]
+    except Exception:
+        pass
+    
+    return json.dumps({
+        'ok': True,
+        'gpu': gpu_info,
+        'python_version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    })
+
+
 @login_required
 def api_list_templates():
     return json.dumps(get_all_templates())
@@ -1619,6 +1704,18 @@ def editor(job_id):
 # ---------------------------------------------------------------------------
 
 if __name__ == '__main__':
+    # Log system information at startup
+    print("="*70)
+    print("Generate Shorts - Video Processing App")
+    print("="*70)
+    print(f"Python: {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
+    print(f"GPU Available: {GPU_AVAILABLE}")
+    gpu_encoder = select_auto_gpu_encoder()
+    if gpu_encoder:
+        print(f"FFmpeg GPU Encoder: {gpu_encoder}")
+    print(f"Base Directory: {BASE_DIR}")
+    print(f"Downloads: {DOWNLOADS_DIR}")
+    print("="*70)
     # allow port overridable by PORT env variable for hosting platforms
     port = int(os.getenv('PORT', 5015))
     debug = os.getenv('FLASK_DEBUG', '1') == '1'
