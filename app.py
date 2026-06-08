@@ -42,8 +42,8 @@ if not os.path.exists(FONTS_DIR):
     os.makedirs(FONTS_DIR)
 
 FONT_DOWNLOAD_URLS = {
-    'Inter':      ('Inter-Regular.ttf', 'https://raw.githubusercontent.com/google/fonts/main/ofl/inter/static/Inter-Regular.ttf'),
-    'Inter Bold': ('Inter-Bold.ttf',   'https://raw.githubusercontent.com/google/fonts/main/ofl/inter/static/Inter-Bold.ttf'),
+    'Inter':      ('Inter-Regular.ttf', 'https://github.com/google/fonts/raw/main/ofl/inter/Inter%5Bopsz%2Cwght%5D.ttf'),
+    'Inter Bold': ('Inter-Bold.ttf',   'https://github.com/google/fonts/raw/main/ofl/inter/Inter%5Bopsz%2Cwght%5D.ttf'),
 }
 ALLOWED_FONT_EXTENSIONS = {'ttf', 'otf'}
 
