@@ -11,6 +11,7 @@ import subprocess
 import unicodedata
 import shutil
 import sqlite3
+import traceback
 from flask import Flask, render_template, request, flash, redirect, url_for, send_from_directory
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from flask_socketio import SocketIO, emit
@@ -362,6 +363,7 @@ def save_jobs():
         print(f"warning: failed to save jobs file: {e}")
 
 active_jobs = load_jobs()
+jobs_lock = threading.Lock()  # Thread-safe access to active_jobs
 
 # ---------------------------------------------------------------------------
 # Editor: colour helpers
@@ -473,7 +475,7 @@ def transcode_to_h264(src_path: str) -> str:
         '-g', '30', '-keyint_min', '30', '-sc_threshold', '0',
         '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
         '-c:a', 'copy', dst_path
-    ], check=True)
+    ], check=True, timeout=600)  # 10-minute timeout
     return dst_path
 
 
@@ -602,19 +604,20 @@ def update_job(job_id, status=None, log=None, **kwargs):
     which made it impossible to keep information such as the generated video
     name while updating status.  This helper merges fields instead.
     """
-    job = active_jobs.setdefault(job_id, {})
-    if status is not None:
-        job['status'] = status
-    if log is not None:
-        job.setdefault('log', []).append(log)
-        # also print to console for visibility
-        try:
-            print(f"[job {job_id}] {log}")
-        except Exception:
-            pass
-    job.update(kwargs)
-    # persist immediately
-    save_jobs()
+    with jobs_lock:
+        job = active_jobs.setdefault(job_id, {})
+        if status is not None:
+            job['status'] = status
+        if log is not None:
+            job.setdefault('log', []).append(log)
+            # also print to console for visibility
+            try:
+                print(f"[job {job_id}] {log}")
+            except Exception:
+                pass
+        job.update(kwargs)
+        # persist immediately
+        save_jobs()
 
 
 def run_unsilence(input_video, output_video, job_id=None):
@@ -629,18 +632,22 @@ def run_unsilence(input_video, output_video, job_id=None):
         update_job(job_id, log="starting unsilence script")
         # stream output line-by-line
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        for line in proc.stdout:
-            update_job(job_id, log=line.rstrip())
-        proc.wait()
+        try:
+            for line in proc.stdout:
+                update_job(job_id, log=line.rstrip())
+            proc.wait(timeout=3600)  # 1 hour max timeout
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            raise RuntimeError("unsilence script timed out after 1 hour")
         if proc.returncode != 0:
             raise RuntimeError(f"unsilence failed (see logs) returncode={proc.returncode}")
     else:
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
         if result.returncode != 0:
             raise RuntimeError(f"unsilence failed: {result.stderr}")
 
 
-def run_crop(input_video, output_dir, overlay=None):
+def run_crop(input_video, output_dir, overlay=None, job_id=None):
     """Crop the face vertically; returns path of resulting video.
 
     The helper script produces MP4 video using OpenCV's "mp4v" codec which
@@ -652,12 +659,15 @@ def run_crop(input_video, output_dir, overlay=None):
     cmd = [sys.executable, script, "--input", input_video, "--output", output_dir]
     if overlay:
         cmd.extend(["--overlay", overlay])
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     if result.returncode != 0:
         raise RuntimeError(f"crop failed: {result.stderr}")
     # script names output as <basename>_processed.mp4
     base = os.path.splitext(os.path.basename(input_video))[0]
     cropped = os.path.join(output_dir, base + "_processed.mp4")
+    # verify output file exists before trying to transcode
+    if not os.path.exists(cropped):
+        raise RuntimeError(f"crop script did not produce output file: {cropped}")
     # always transcode to h264 for browser compatibility
     trans = os.path.join(output_dir, base + "_processed_h264.mp4")
     try:
@@ -667,11 +677,12 @@ def run_crop(input_video, output_dir, overlay=None):
             '-g', '30', '-keyint_min', '30', '-sc_threshold', '0',
             '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
             '-c:a', 'copy', trans
-        ], check=True)
+        ], check=True, timeout=600)
         return trans
     except subprocess.CalledProcessError as e:
         # if transcoding fails fall back to original cropped file
-        update_job(0, log=f"warning: h264 transcode failed, using original: {e}")
+        if job_id:
+            update_job(job_id, log=f"warning: h264 transcode failed, using original: {e}")
         return cropped
 
 
@@ -691,11 +702,11 @@ def run_subtitles(input_video, output_dir, model="large", max_length=22, job_id=
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         for line in proc.stdout:
             update_job(job_id, log=line.rstrip())
-        proc.wait()
+        proc.wait(timeout=3600)  # 1 hour max for subtitle generation
         if proc.returncode != 0:
             raise RuntimeError(f"subtitle generation failed (see logs); rc={proc.returncode}")
     else:
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
         if result.returncode != 0:
             raise RuntimeError(f"subtitle generation failed: {result.stderr}")
     # output files use same base name convention as the helper script
@@ -807,7 +818,7 @@ def background_pipeline(job_id, url=None, upload_path=None, start_time="0", end_
                 "--force-keyframes-at-cuts", "--no-check-certificate", "-o", cut_path, url
             ]
             try:
-                subprocess.run(cmd, check=True)
+                subprocess.run(cmd, check=True, timeout=1800)  # 30-minute timeout for YouTube download
             except subprocess.CalledProcessError as e:
                 # some videos/datacenters don't support range requests; fall back to full
                 update_job(job_id, log="section download failed, falling back to full download and manual trim")
@@ -815,12 +826,12 @@ def background_pipeline(job_id, url=None, upload_path=None, start_time="0", end_
                 subprocess.run([
                     "yt-dlp", "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
                     "-o", full, url
-                ], check=True)
+                ], check=True, timeout=1800)
                 ff = ["ffmpeg", "-y", "-i", full, "-ss", start_time]
                 if end_time:
                     ff += ["-to", end_time]
                 ff += ["-c", "copy", cut_path]
-                subprocess.run(ff, check=True)
+                subprocess.run(ff, check=True, timeout=600)
         else:
             # Verificăm dacă avem nevoie de o tăiere sau folosim direct fișierul original
             start_sec = _time_to_seconds(start_time)
@@ -852,7 +863,7 @@ def background_pipeline(job_id, url=None, upload_path=None, start_time="0", end_
                     "-avoid_negative_ts", "make_zero", # Resetează indicii de timp la 0 (rezolvă freeze-ul pe TikTok/VLC)
                     cut_path
                 ]
-                subprocess.run(ff, check=True)
+                subprocess.run(ff, check=True, timeout=600)
 
         if skip_unsilence:
             update_job(job_id, status="skipping unsilence", log="user requested no audio cleaning")
@@ -867,7 +878,7 @@ def background_pipeline(job_id, url=None, upload_path=None, start_time="0", end_
             cropped = unsilenced
         else:
             update_job(job_id, status="cropping", log="running crop script")
-            cropped = run_crop(unsilenced, DOWNLOADS_DIR)
+            cropped = run_crop(unsilenced, DOWNLOADS_DIR, job_id=job_id)
 
         update_job(job_id, status="subtitling", log="generating subtitles")
         srtfile, assfile = run_subtitles(cropped, DOWNLOADS_DIR, job_id=job_id)
@@ -887,7 +898,9 @@ def background_pipeline(job_id, url=None, upload_path=None, start_time="0", end_
                         os.path.basename(cropped), os.path.basename(srtfile),
                         skip_unsilence=skip_unsilence, skip_cropping=skip_cropping)
     except Exception as e:
-        update_job(job_id, status="error", msg=str(e))
+        error_trace = traceback.format_exc()
+        update_job(job_id, status="error", msg=str(e), trace=error_trace)
+        print(f"[job {job_id}] Exception: {error_trace}")
 
 
 @app.route('/video-cut', methods=['GET', 'POST'])
@@ -900,6 +913,10 @@ def video_cut():
         skip_unsilence = request.form.get('skip_unsilence') == 'on'
         skip_cropping = request.form.get('skip_cropping') == 'on'
         job_id = request.form.get('job_id') or f"J{int(datetime.datetime.now().timestamp())}"
+        # Sanitize job_id: only allow alphanumeric, underscore, and dash
+        job_id = re.sub(r'[^a-zA-Z0-9_-]', '', job_id)
+        if not job_id:
+            job_id = f"J{int(datetime.datetime.now().timestamp())}"
 
         upload_path = None
         if 'file' in request.files and request.files['file'].filename:
@@ -921,9 +938,10 @@ def video_cut():
                 srt_path = os.path.join(DOWNLOADS_DIR, srt_name) if srt_name else None
                 # ensure both files still exist; if either missing, treat as stale
                 if os.path.exists(video_path) and (srt_path is None or os.path.exists(srt_path)):
-                    active_jobs[job_id] = {'status': 'completed',
-                                           'video': video_name,
-                                           'srt': srt_name}
+                    with jobs_lock:
+                        active_jobs[job_id] = {'status': 'completed',
+                                               'video': video_name,
+                                               'srt': srt_name}
                     return {"status": "completed", "job_id": job_id}, 200
                 else:
                     # cache is stale; remove entry entirely
@@ -939,7 +957,8 @@ def video_cut():
                                       'end_time': end_time,
                                       'skip_unsilence': skip_unsilence,
                                       'skip_cropping': skip_cropping,
-                                  })
+                                  },
+                                  daemon=True)  # Daemon thread won't block app shutdown
         thread.start()
         return {"status": "accepted", "job_id": job_id}, 202
     return render_template('video_cut.html')
@@ -948,7 +967,8 @@ def video_cut():
 @app.route('/check-job/<job_id>')
 @login_required
 def check_job(job_id):
-    info = active_jobs.get(job_id, {'status': 'not_found'})
+    with jobs_lock:
+        info = active_jobs.get(job_id, {'status': 'not_found'})
     return json.dumps(info)
 
 
@@ -1003,6 +1023,10 @@ def api_detect_faces_file():
 @app.route('/download/<filename>')
 @login_required
 def download_file(filename):
+    # Sanitize filename to prevent path traversal attacks
+    filename = os.path.basename(filename)
+    if '/' in filename or '\\' in filename or '..' in filename:
+        return '', 403
     return send_from_directory(DOWNLOADS_DIR, filename, as_attachment=True)
 
 
@@ -1016,6 +1040,10 @@ def preview_file(filename):
     transcode to h264 on-the-fly and send the converted file instead.  The new
     file is cached alongside the original so the conversion only happens once.
     """
+    # Sanitize filename to prevent path traversal attacks
+    filename = os.path.basename(filename)
+    if '/' in filename or '\\' in filename or '..' in filename:
+        return '', 403
     search_dirs = [DOWNLOADS_DIR, TEMPLATE_ASSETS_DIR]
     for directory in search_dirs:
         path = os.path.join(directory, filename)
@@ -1037,6 +1065,10 @@ def preview_file(filename):
 @login_required
 def serve_font(filename):
     """Serve font files from the fonts directory for browser preview."""
+    # Sanitize filename to prevent path traversal attacks
+    filename = os.path.basename(filename)
+    if '/' in filename or '\\' in filename or '..' in filename:
+        return '', 403
     return send_from_directory(FONTS_DIR, filename, as_attachment=False)
 
 
@@ -1106,16 +1138,19 @@ def index():
 @login_required
 def list_projects():
     # show simple table of all jobs with edit/delete links
-    return render_template('projects.html', jobs=active_jobs)
+    with jobs_lock:
+        projects = dict(active_jobs)  # Thread-safe snapshot
+    return render_template('projects.html', jobs=projects)
 
 
 @app.route('/delete_project/<job_id>', methods=['POST'])
 @login_required
 def delete_project(job_id):
     # remove job state and any downloaded files
-    job = active_jobs.pop(job_id, None)
+    with jobs_lock:
+        job = active_jobs.pop(job_id, None)
     if job:
-        for key in ('video','srt'):
+        for key in ('video', 'srt', 'ass'):
             if job.get(key):
                 try:
                     os.remove(os.path.join(DOWNLOADS_DIR, job[key]))
