@@ -284,12 +284,9 @@ def process_video(video_path, output_path, net, overlay, smoothing=0.8):
     print(f"Finished processing video: {final_output}")
 
 def main(input_path=None, output_dir=None, overlay_path=None,
-         proto=PROTOTXT, model=CAFFE_MODEL, smoothing=0.8):
-    """Process either a single file or every file in a directory.
-
-    Parameters mirror the earlier hardcoded globals but are now arguments so
-    the module can be invoked programmatically or from the command line.
-    """
+         proto=PROTOTXT, model=CAFFE_MODEL, smoothing=0.8, cpu_only=False):
+    """Process either a single file or every file in a directory."""
+    
     # determine output directory
     if output_dir is None:
         output_dir = OUTPUT_FOLDER
@@ -303,12 +300,17 @@ def main(input_path=None, output_dir=None, overlay_path=None,
 
     # Load face detection network.
     net = cv2.dnn.readNetFromCaffe(proto, model)
-    try:
-        net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
-        net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
-        print("Using CUDA for face detection.")
-    except Exception as e:
-        print("CUDA not available, using CPU. Error:", e)
+    
+    # Check if we should bypass CUDA
+    if not cpu_only:
+        try:
+            net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
+            net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
+            print("Using CUDA for face detection.")
+        except Exception as e:
+            print("CUDA not available, using CPU. Error:", e)
+    else:
+        print("CPU-only mode requested. Bypassing CUDA.")
 
     # build list of videos to process
     if input_path is None:
@@ -340,6 +342,8 @@ if __name__ == "__main__":
     parser.add_argument("--proto", default=PROTOTXT, help="Caffe prototxt")
     parser.add_argument("--model", default=CAFFE_MODEL, help="Caffe model file (overrides default utils path)")
     parser.add_argument("--smoothing", type=float, default=0.8)
+    # ADD THE CPU-ONLY FLAG HERE:
+    parser.add_argument("--cpu-only", action="store_true", help="Force CPU-only processing")
     args = parser.parse_args()
 
     main(input_path=args.input,
@@ -347,4 +351,5 @@ if __name__ == "__main__":
          overlay_path=args.overlay,
          proto=args.proto,
          model=args.model,
-         smoothing=args.smoothing)
+         smoothing=args.smoothing,
+         cpu_only=args.cpu_only) # PASS IT TO MAIN HERE
