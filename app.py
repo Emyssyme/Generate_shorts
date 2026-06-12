@@ -12,6 +12,7 @@ import unicodedata
 import shutil
 import sqlite3
 import traceback
+import tempfile
 from flask import Flask, render_template, request, flash, redirect, url_for, send_from_directory
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from flask_socketio import SocketIO, emit
@@ -40,6 +41,81 @@ if not os.path.exists(DOWNLOADS_DIR):
 FONTS_DIR = os.path.join(BASE_DIR, 'fonts')
 if not os.path.exists(FONTS_DIR):
     os.makedirs(FONTS_DIR)
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Cross-platform Fontconfig setup
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _build_fontconfig_xml(fonts_dir, cache_dir):
+    """Generate a fontconfig XML string that works on Linux, macOS and Windows."""
+    dirs = []
+    if sys.platform.startswith('win'):
+        dirs.append('<dir>WINDOWSFONTDIR</dir>')
+        # also scan %LOCALAPPDATA%\Microsoft\Windows\Fonts if it exists
+        local_fonts = os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Microsoft', 'Windows', 'Fonts')
+        if os.path.isdir(local_fonts):
+            dirs.append(f'<dir>{local_fonts}</dir>')
+    elif sys.platform == 'darwin':
+        dirs.append('<dir>/System/Library/Fonts</dir>')
+        dirs.append('<dir>/Library/Fonts</dir>')
+        dirs.append('<dir>~/Library/Fonts</dir>')
+    else:
+        dirs.append('<dir>/usr/share/fonts</dir>')
+        dirs.append('<dir>/usr/local/share/fonts</dir>')
+        dirs.append('<dir>~/.local/share/fonts</dir>')
+        dirs.append('<dir>~/.fonts</dir>')
+    # Always include the app's local fonts directory
+    dirs.append(f'<dir>{fonts_dir}</dir>')
+
+    return f'''<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+<fontconfig>
+    <dir>{fonts_dir}</dir>
+    {''.join(dirs)}
+    <cachedir>{cache_dir}</cachedir>
+    <config>
+        <rescan>
+            <int>30</int>
+        </rescan>
+    </config>
+</fontconfig>'''
+
+
+def setup_fontconfig():
+    """Create fonts.conf and return its path so libass/ffmpeg
+    can find fonts on every platform without warnings."""
+    fonts_dir_abs = os.path.abspath(FONTS_DIR).replace('\\', '/')
+    cache_dir = os.path.join(os.path.abspath(FONTS_DIR), '.fc-cache')
+    os.makedirs(cache_dir, exist_ok=True)
+
+    fc_conf_path = os.path.join(BASE_DIR, 'fonts.conf')
+
+    xml = _build_fontconfig_xml(fonts_dir_abs, cache_dir)
+    if sys.platform.startswith('win'):
+        windir = os.environ.get('WINDIR', 'C:\\Windows')
+        xml = xml.replace('WINDOWSFONTDIR', (windir + '\\Fonts').replace('\\', '/'))
+
+    with open(fc_conf_path, 'w', encoding='utf-8') as f:
+        f.write(xml)
+
+    return fc_conf_path
+
+
+def ffmpeg_env():
+    """Return an os.environ copy with FONTCONFIG_PATH set for FFmpeg subprocess calls."""
+    env = os.environ.copy()
+    fc_conf = os.path.join(BASE_DIR, 'fonts.conf')
+    if os.path.exists(fc_conf):
+        env['FONTCONFIG_PATH'] = BASE_DIR
+        env['FC_CONFIG_DIR'] = BASE_DIR
+    # Also force UTF-8 for consistent behaviour
+    env.setdefault('PYTHONUTF8', '1')
+    env.setdefault('PYTHONIOENCODING', 'utf-8')
+    return env
+
+# Run once at startup
+FONTCONFIG_CONF = setup_fontconfig()
+print(f"Fontconfig set up: FONTCONFIG_PATH={BASE_DIR}")
 
 FONT_DOWNLOAD_URLS = {
     'Inter':      ('Inter-Regular.ttf', 'https://github.com/google/fonts/raw/main/ofl/inter/Inter%5Bopsz%2Cwght%5D.ttf'),
@@ -153,6 +229,16 @@ def ensure_default_fonts():
 ensure_default_fonts()
 refresh_font_map()
 
+def clean_filter_path(raw_path):
+    """
+    Transforms standard system paths into secure, cross-platform
+    escaped strings for use inside FFmpeg filter scripts.
+    """
+    # 1. Flip Windows backslashes into standard Unix forward slashes 
+    normalized = raw_path.replace('\\', '/')
+    # 2. Double-escape the colon (C\:/...) so the filter syntax engine doesn't trip
+    return normalized.replace(':', '\\\\:')
+
 # simple sqlite cache to avoid reprocessing identical url/time ranges
 CACHE_DB = os.path.join(BASE_DIR, "cache.db")
 TEMPLATES_DB = os.path.join(BASE_DIR, "templates.db")
@@ -175,6 +261,11 @@ def init_cache():
             c.execute('ALTER TABLE cache ADD COLUMN skip_cropping INTEGER DEFAULT 0')
         except Exception:
             pass
+    if 'skip_subtitles' not in columns:
+        try:
+            c.execute('ALTER TABLE cache ADD COLUMN skip_subtitles INTEGER DEFAULT 0')
+        except Exception:
+            pass
     c.execute('''
         CREATE TABLE IF NOT EXISTS cache (
             url TEXT,
@@ -184,7 +275,8 @@ def init_cache():
             srt TEXT,
             skip_unsilence INTEGER DEFAULT 0,
             skip_cropping INTEGER DEFAULT 0,
-            UNIQUE(url, start, end, skip_unsilence, skip_cropping)
+            skip_subtitles INTEGER DEFAULT 0,
+            UNIQUE(url, start, end, skip_unsilence, skip_cropping, skip_subtitles)
         )
     ''')
     conn.commit()
@@ -315,26 +407,26 @@ def delete_template(name):
 init_cache()
 init_templates_db()
 
-def find_cache(url, start, end, skip_unsilence=False, skip_cropping=False):
+def find_cache(url, start, end, skip_unsilence=False, skip_cropping=False, skip_subtitles=False):
     conn = sqlite3.connect(CACHE_DB)
     c = conn.cursor()
-    c.execute('SELECT video, srt FROM cache WHERE url=? AND start=? AND end=? AND skip_unsilence=? AND skip_cropping=?',
-              (url or '', start or '', end or '', int(skip_unsilence), int(skip_cropping)))
+    c.execute('SELECT video, srt FROM cache WHERE url=? AND start=? AND end=? AND skip_unsilence=? AND skip_cropping=? AND skip_subtitles=?',
+              (url or '', start or '', end or '', int(skip_unsilence), int(skip_cropping), int(skip_subtitles)))
     row = c.fetchone()
     conn.close()
     return row  # either None or (video, srt)
 
-def store_cache(url, start, end, video, srt, skip_unsilence=False, skip_cropping=False):
+def store_cache(url, start, end, video, srt, skip_unsilence=False, skip_cropping=False, skip_subtitles=False):
     conn = sqlite3.connect(CACHE_DB)
     c = conn.cursor()
     try:
         if video is None or srt is None:
             # remove stale entry for this configuration
-            c.execute('DELETE FROM cache WHERE url=? AND start=? AND end=? AND skip_unsilence=? AND skip_cropping=?',
-                      (url or '', start or '', end or '', int(skip_unsilence), int(skip_cropping)))
+            c.execute('DELETE FROM cache WHERE url=? AND start=? AND end=? AND skip_unsilence=? AND skip_cropping=? AND skip_subtitles=?',
+                      (url or '', start or '', end or '', int(skip_unsilence), int(skip_cropping), int(skip_subtitles)))
         else:
-            c.execute('INSERT OR REPLACE INTO cache (url, start, end, video, srt, skip_unsilence, skip_cropping) VALUES (?,?,?,?,?,?,?)',
-                      (url or '', start or '', end or '', video, srt, int(skip_unsilence), int(skip_cropping)))
+            c.execute('INSERT OR REPLACE INTO cache (url, start, end, video, srt, skip_unsilence, skip_cropping, skip_subtitles) VALUES (?,?,?,?,?,?,?,?)',
+                      (url or '', start or '', end or '', video, srt, int(skip_unsilence), int(skip_cropping), int(skip_subtitles)))
         conn.commit()
     finally:
         conn.close()
@@ -390,7 +482,7 @@ def get_video_size(video_path: str):
         r = subprocess.run(
             ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
              '-show_entries', 'stream=width,height', '-of', 'csv=p=0', video_path],
-            capture_output=True, text=True
+            capture_output=True, text=True, env=ffmpeg_env()
         )
         if r.returncode == 0:
             parts = r.stdout.strip().split(',')
@@ -453,7 +545,7 @@ def is_h264(video_path: str) -> bool:
             ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
              '-show_entries', 'stream=codec_name',
              '-of', 'default=noprint_wrappers=1:nokey=1', video_path],
-            capture_output=True, text=True
+            capture_output=True, text=True, env=ffmpeg_env()
         )
         return r.stdout.strip() == 'h264'
     except Exception:
@@ -475,7 +567,7 @@ def transcode_to_h264(src_path: str) -> str:
         '-g', '30', '-keyint_min', '30', '-sc_threshold', '0',
         '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
         '-c:a', 'copy', dst_path
-    ], check=True, timeout=600)  # 10-minute timeout
+    ], check=True, timeout=600, env=ffmpeg_env())  # 10-minute timeout
     return dst_path
 
 
@@ -718,7 +810,7 @@ def run_crop(input_video, output_dir, overlay=None, job_id=None):
             '-g', '30', '-keyint_min', '30', '-sc_threshold', '0',
             '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
             '-c:a', 'copy', trans
-        ], check=True, timeout=600)
+        ], check=True, timeout=600, env=ffmpeg_env())
         return trans
     except subprocess.CalledProcessError as e:
         # if transcoding fails fall back to original cropped file
@@ -738,18 +830,44 @@ def run_subtitles(input_video, output_dir, model="large", max_length=22, job_id=
     script = find_script("_generate_subtitles.py")
     cmd = [sys.executable, script, "--input", input_video, "--output", output_dir,
            "--model", model, "--max-length", str(max_length)]
+    
+    # 1. Prepare environment variables to force the child process into UTF-8 Mode
+    sub_env = os.environ.copy()
+    sub_env["PYTHONUTF8"] = "1"
+    sub_env["PYTHONIOENCODING"] = "utf-8"
+
     if job_id:
         update_job(job_id, log="starting subtitle generation")
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        
+        # 2. Added encoding='utf-8' and passed the sub_env
+        proc = subprocess.Popen(
+            cmd, 
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.STDOUT, 
+            text=True, 
+            encoding='utf-8', 
+            env=sub_env
+        )
+        
         for line in proc.stdout:
             update_job(job_id, log=line.rstrip())
+        
         proc.wait(timeout=3600)  # 1 hour max for subtitle generation
         if proc.returncode != 0:
             raise RuntimeError(f"subtitle generation failed (see logs); rc={proc.returncode}")
     else:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+        # 3. Added encoding='utf-8' and passed the sub_env here as well
+        result = subprocess.run(
+            cmd, 
+            capture_output=True, 
+            text=True, 
+            encoding='utf-8', 
+            env=sub_env, 
+            timeout=3600
+        )
         if result.returncode != 0:
             raise RuntimeError(f"subtitle generation failed: {result.stderr}")
+            
     # output files use same base name convention as the helper script
     base = os.path.splitext(os.path.basename(input_video))[0]
     srt_path = os.path.join(output_dir, base + ".srt")
@@ -840,11 +958,12 @@ def _time_to_seconds(t_val):
             return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
     return float(t_str)
 
-def background_pipeline(job_id, url=None, upload_path=None, start_time="0", end_time=None, skip_unsilence=False, skip_cropping=False):
+def background_pipeline(job_id, url=None, upload_path=None, start_time="0", end_time=None, skip_unsilence=False, skip_cropping=False, skip_subtitles=False):
     """Background thread that cuts/downloads then optionally unsilences, crops, subtitles.
 
     ``skip_unsilence`` is used when the user knows the clip already has clean audio.
     ``skip_cropping`` is used to bypass the face-crop step entirely (e.g. when no face is present).
+    ``skip_subtitles`` is used to skip automatic subtitle generation entirely.
     These flags are recorded in the cache so repeated calls behave identically.
     """
     update_job(job_id, status="starting", log="job created")
@@ -872,7 +991,7 @@ def background_pipeline(job_id, url=None, upload_path=None, start_time="0", end_
                 if end_time:
                     ff += ["-to", end_time]
                 ff += ["-c", "copy", cut_path]
-                subprocess.run(ff, check=True, timeout=600)
+                subprocess.run(ff, check=True, timeout=600, env=ffmpeg_env())
         else:
             # Verificăm dacă avem nevoie de o tăiere sau folosim direct fișierul original
             start_sec = _time_to_seconds(start_time)
@@ -904,7 +1023,7 @@ def background_pipeline(job_id, url=None, upload_path=None, start_time="0", end_
                     "-avoid_negative_ts", "make_zero", # Resetează indicii de timp la 0 (rezolvă freeze-ul pe TikTok/VLC)
                     cut_path
                 ]
-                subprocess.run(ff, check=True, timeout=600)
+                subprocess.run(ff, check=True, timeout=600, env=ffmpeg_env())
 
         if skip_unsilence:
             update_job(job_id, status="skipping unsilence", log="user requested no audio cleaning")
@@ -921,23 +1040,27 @@ def background_pipeline(job_id, url=None, upload_path=None, start_time="0", end_
             update_job(job_id, status="cropping", log="running crop script")
             cropped = run_crop(unsilenced, DOWNLOADS_DIR, job_id=job_id)
 
-        update_job(job_id, status="subtitling", log="generating subtitles")
-        srtfile, assfile = run_subtitles(cropped, DOWNLOADS_DIR, job_id=job_id)
+        if skip_subtitles:
+            update_job(job_id, status="skipping subtitles", log="user requested no automatic subtitles")
+            srtfile, assfile = None, None
+        else:
+            update_job(job_id, status="subtitling", log="generating subtitles")
+            srtfile, assfile = run_subtitles(cropped, DOWNLOADS_DIR, job_id=job_id)
 
-        # sanity check: ensure subtitles were actually written
-        if not os.path.exists(srtfile):
-            raise RuntimeError(f"subtitle file not found after generation: {srtfile}")
+            # sanity check: ensure subtitles were actually written
+            if not os.path.exists(srtfile):
+                raise RuntimeError(f"subtitle file not found after generation: {srtfile}")
 
         update_job(job_id, status="completed",
                    video=os.path.basename(cropped),
-                   srt=os.path.basename(srtfile),
-                   ass=os.path.basename(assfile) if os.path.exists(assfile) else None,
+                   srt=os.path.basename(srtfile) if srtfile else None,
+                   ass=os.path.basename(assfile) if (assfile and os.path.exists(assfile)) else None,
                    log="all steps finished")
         # cache this result for future identical requests
         if url:
             store_cache(url, start_time, end_time,
-                        os.path.basename(cropped), os.path.basename(srtfile),
-                        skip_unsilence=skip_unsilence, skip_cropping=skip_cropping)
+                        os.path.basename(cropped), os.path.basename(srtfile) if srtfile else None,
+                        skip_unsilence=skip_unsilence, skip_cropping=skip_cropping, skip_subtitles=skip_subtitles)
     except Exception as e:
         error_trace = traceback.format_exc()
         update_job(job_id, status="error", msg=str(e), trace=error_trace)
@@ -953,6 +1076,7 @@ def video_cut():
         end_time = request.form.get('end_time')
         skip_unsilence = request.form.get('skip_unsilence') == 'on'
         skip_cropping = request.form.get('skip_cropping') == 'on'
+        skip_subtitles = request.form.get('skip_subtitles') == 'on'
         job_id = request.form.get('job_id') or f"J{int(datetime.datetime.now().timestamp())}"
         # Sanitize job_id: only allow alphanumeric, underscore, and dash
         job_id = re.sub(r'[^a-zA-Z0-9_-]', '', job_id)
@@ -972,7 +1096,7 @@ def video_cut():
 
         # if this is a URL request, check cache first
         if url and not upload_path:
-            cached = find_cache(url, start_time, end_time, skip_unsilence=skip_unsilence, skip_cropping=skip_cropping)
+            cached = find_cache(url, start_time, end_time, skip_unsilence=skip_unsilence, skip_cropping=skip_cropping, skip_subtitles=skip_subtitles)
             if cached:
                 video_name, srt_name = cached
                 video_path = os.path.join(DOWNLOADS_DIR, video_name)
@@ -986,7 +1110,7 @@ def video_cut():
                     return {"status": "completed", "job_id": job_id}, 200
                 else:
                     # cache is stale; remove entry entirely
-                    store_cache(url, start_time, end_time, None, None, skip_unsilence=skip_unsilence, skip_cropping=skip_cropping)
+                    store_cache(url, start_time, end_time, None, None, skip_unsilence=skip_unsilence, skip_cropping=skip_cropping, skip_subtitles=skip_subtitles)
 
         # start background work
         thread = threading.Thread(target=background_pipeline,
@@ -998,6 +1122,7 @@ def video_cut():
                                       'end_time': end_time,
                                       'skip_unsilence': skip_unsilence,
                                       'skip_cropping': skip_cropping,
+                                      'skip_subtitles': skip_subtitles,
                                   },
                                   daemon=True)  # Daemon thread won't block app shutdown
         thread.start()
@@ -1143,6 +1268,76 @@ GPU_ENCODER_QUALITY = {
 }
 
 FFMPEG_ENCODER_CACHE = {}
+DRAWTEXT_LETTER_SPACING_SUPPORTED = None   # tri-state: None → not probed yet
+FILTER_COMPLEX_SCRIPT_SUPPORTED = None     # tri-state: None → not probed yet
+
+
+def _probe_ffmpeg_filter_option(filter_name, option_name, test_value='1'):
+    """Return True if *option_name* is accepted by *filter_name*.
+
+    Creates a tiny synthetic input (color source), applies the filter with the
+    option set, and checks stderr for 'Option not found'.  Result is cached
+    globally so the probe runs only once per process lifetime.
+    """
+    cmd = [
+        'ffmpeg', '-nostdin', '-v', 'error',
+        '-f', 'lavfi', '-i', 'color=size=2x2:rate=1:duration=0.01',
+        '-vf', f'{filter_name}={option_name}={test_value}',
+        '-f', 'null', '-'
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15, env=ffmpeg_env())
+        stderr_lower = (result.stderr or '').lower()
+        if 'option not found' in stderr_lower:
+            return False
+        # Also treat "No such filter" as unsupported
+        if 'no such filter' in stderr_lower:
+            return False
+        return True
+    except Exception as exc:
+        print(f"Warning: ffmpeg option probe failed for {filter_name}/{option_name}: {exc}")
+        return False
+
+
+def drawtext_supports_letter_spacing():
+    """Return True if the installed FFmpeg's drawtext filter accepts `letter_spacing`."""
+    global DRAWTEXT_LETTER_SPACING_SUPPORTED
+    if DRAWTEXT_LETTER_SPACING_SUPPORTED is None:
+        DRAWTEXT_LETTER_SPACING_SUPPORTED = _probe_ffmpeg_filter_option('drawtext', 'letter_spacing')
+        print(f"drawtext letter_spacing supported: {DRAWTEXT_LETTER_SPACING_SUPPORTED}")
+    return DRAWTEXT_LETTER_SPACING_SUPPORTED
+
+
+def ffmpeg_supports_filter_complex_script():
+    """Return True if the installed FFmpeg accepts `-filter_complex_script`."""
+    global FILTER_COMPLEX_SCRIPT_SUPPORTED
+    if FILTER_COMPLEX_SCRIPT_SUPPORTED is None:
+        import tempfile
+        td = tempfile.gettempdir()
+        script_path = os.path.join(td, '_fc_probe.txt')
+        try:
+            with open(script_path, 'w', encoding='utf-8') as f:
+                f.write('[0:v]null[out]')
+            result = subprocess.run(
+                ['ffmpeg', '-nostdin', '-v', 'error',
+                 '-f', 'lavfi', '-i', 'color=size=2x2:rate=1:duration=0.01',
+                 '-filter_complex_script', script_path,
+                 '-map', '[out]', '-f', 'null', '-'],
+                capture_output=True, text=True, timeout=15, env=ffmpeg_env()
+            )
+            stderr_lower = (result.stderr or '').lower()
+            FILTER_COMPLEX_SCRIPT_SUPPORTED = 'option not found' not in stderr_lower
+        except Exception as exc:
+            print(f"Warning: ffmpeg filter_complex_script probe failed: {exc}")
+            FILTER_COMPLEX_SCRIPT_SUPPORTED = False
+        finally:
+            try:
+                os.remove(script_path)
+            except Exception:
+                pass
+        print(f"filter_complex_script supported: {FILTER_COMPLEX_SCRIPT_SUPPORTED}")
+    return FILTER_COMPLEX_SCRIPT_SUPPORTED
+
 
 def detect_gpu_available():
     """Detect if GPU/CUDA is available for accelerated processing."""
@@ -1175,7 +1370,7 @@ def ffmpeg_supports_encoder(name):
     try:
         result = subprocess.run(
             ['ffmpeg', '-hide_banner', '-encoders'],
-            capture_output=True, text=True, timeout=15
+            capture_output=True, text=True, timeout=15, env=ffmpeg_env()
         )
         supported = name in result.stdout
     except Exception as exc:
@@ -1302,8 +1497,9 @@ def editor(job_id):
     job.setdefault('gpu_mode', 'auto')
     job.setdefault('title_bold', False)
     job.setdefault('sub_bold', False)
+    job.setdefault('sub_highlight_opacity', '100')
 
-    srt_path = os.path.join(DOWNLOADS_DIR, job.get('srt', ''))
+    srt_path = os.path.join(DOWNLOADS_DIR, job.get('srt') or '')
     srt_text = ''
     if os.path.exists(srt_path):
         with open(srt_path, encoding='utf-8') as f:
@@ -1314,6 +1510,34 @@ def editor(job_id):
 
     if request.method == 'POST':
         save_only = request.form.get('save') == '1'
+
+        # ── Import SRT/ASS file ──────────────────────────────────────────
+        subtitle_file = request.files.get('subtitle_file')
+        if subtitle_file and subtitle_file.filename:
+            safe_name = os.path.basename(subtitle_file.filename)
+            ext = os.path.splitext(safe_name)[1].lower()
+            if ext in ('.srt', '.ass'):
+                dest_path = os.path.join(DOWNLOADS_DIR, safe_name)
+                subtitle_file.save(dest_path)
+                # set job's srt/ass to the imported file
+                job['srt'] = safe_name
+                srt_path = dest_path
+                if ext == '.ass':
+                    job['ass'] = safe_name
+                else:
+                    # generate ASS from imported SRT
+                    ass_name = os.path.splitext(safe_name)[0] + '.ass'
+                    try:
+                        with open(dest_path, encoding='utf-8') as f:
+                            imported_srt = f.read()
+                        srt_to_ass(imported_srt, os.path.join(DOWNLOADS_DIR, ass_name))
+                        job['ass'] = ass_name
+                    except Exception as e:
+                        update_job(job_id, log=f"warning: could not build ASS from imported SRT: {e}")
+                flash(f'Subtitles imported: {safe_name}', 'success')
+            else:
+                flash('Only .srt and .ass files are supported for subtitle import.', 'warning')
+
         # ── save SRT edits ────────────────────────────────────────────────
         # strip accumulated leading/trailing whitespace so every save is clean
         new_srt = request.form.get('srt_text', '').strip()
@@ -1332,7 +1556,7 @@ def editor(job_id):
         # The new ASS has one Dialogue event per SRT entry (no karaoke)
         # but inherits all styling via force_style at render time.
         if new_srt:
-            new_ass_name = os.path.splitext(job.get('srt', ''))[0] + '.ass'
+            new_ass_name = os.path.splitext(job.get('srt') or '')[0] + '.ass'
             try:
                 srt_to_ass(new_srt, os.path.join(DOWNLOADS_DIR, new_ass_name))
                 job['ass'] = new_ass_name
@@ -1362,6 +1586,7 @@ def editor(job_id):
         sub_color    = request.form.get('sub_color', '#ffffff')
         sub_highlight_color = request.form.get('sub_highlight_color', '#ffff00')
         sub_highlight_text_color = request.form.get('sub_highlight_text_color', '#000000')
+        sub_highlight_opacity = parse_int_field(request.form.get('sub_highlight_opacity', '100'), 100)
         sub_stroke   = request.form.get('sub_stroke_color', '#000000')
         sub_size     = parse_int_field(request.form.get('sub_size', '18'), 18)
         sub_y        = parse_int_field(request.form.get('sub_y', job.get('sub_y', '30')), 30)
@@ -1377,6 +1602,16 @@ def editor(job_id):
         # preview dimensions used for scaling
         prev_w       = float(request.form.get('preview_w') or 0)
         prev_h       = float(request.form.get('preview_h') or 0)
+        # ── spacing controls ──────────────────────────────────────────────
+        title_line_sp   = parse_int_field(request.form.get('title_line_spacing', '0'), 0)
+        title_letter_sp = parse_int_field(request.form.get('title_letter_spacing', '0'), 0)
+        sub_line_sp     = parse_int_field(request.form.get('sub_line_spacing', '0'), 0)
+        sub_letter_sp   = parse_int_field(request.form.get('sub_letter_spacing', '0'), 0)
+        # ── advanced export controls ──────────────────────────────────────
+        export_fps      = request.form.get('export_fps', '').strip()
+        export_bitrate  = request.form.get('export_bitrate', '').strip()
+        export_res_w    = request.form.get('export_res_w', '').strip()
+        export_res_h    = request.form.get('export_res_h', '').strip()
 
         job.update({
             'title_text': title_text,   'title_font': title_font,
@@ -1388,6 +1623,7 @@ def editor(job_id):
             'sub_color': sub_color,
             'sub_highlight_color': sub_highlight_color,
             'sub_highlight_text_color': sub_highlight_text_color,
+            'sub_highlight_opacity': sub_highlight_opacity,
             'sub_stroke_color': sub_stroke, 'sub_size': sub_size, 'sub_y': sub_y,
             'sub_outline_w': sub_outline_w,
             'sub_hl_box': sub_hl_box,
@@ -1397,6 +1633,15 @@ def editor(job_id):
             'overlay_x': overlay_x,    'overlay_y': overlay_y,
             'overlay_w': overlay_w,    'overlay_h': overlay_h,
             'preview_w': prev_w, 'preview_h': prev_h,
+            'title_line_spacing': title_line_sp,
+            'title_letter_spacing': title_letter_sp,
+            'sub_line_spacing': sub_line_sp,
+            'sub_letter_spacing': sub_letter_sp,
+            'export_fps': export_fps,
+            'export_bitrate': export_bitrate,
+            'export_res_w': export_res_w,
+            'export_res_h': export_res_h,
+            'gpu_mode': gpu_mode,
         })
 
         # ── download or upload fonts ────────────────────────────────────────
@@ -1484,8 +1729,9 @@ def editor(job_id):
         vf_parts = []
 
         effective_sub_font = sub_font
-        if sub_bold and not effective_sub_font.endswith(' Bold'):
-            effective_sub_font = f"{effective_sub_font} Bold"
+        # Use Bold=1 in ASS force_style instead of appending " Bold" to FontName,
+        # because the true font family (e.g. Inter) is just the base name.
+        sub_bold_flag = 'Bold=1' if sub_bold else ''
 
         if has_srt:
             # Use ASS file for word-level background-highlight when available
@@ -1532,6 +1778,11 @@ def editor(job_id):
                         f"BorderStyle=3,Outline={sub_outline_w},Shadow=1,"
                         f"Alignment=2,MarginV={sub_y}"
                     )
+                    if sub_bold_flag:
+                        sub_style += f",{sub_bold_flag}"
+                    sub_letter_sp = int(job.get('sub_letter_spacing', 0) or 0)
+                    if sub_letter_sp:
+                        sub_style += f",Spacing={sub_letter_sp}"
                 else:
                     sub_style = (
                         f"FontName={effective_sub_font},FontSize={sub_size},"
@@ -1539,7 +1790,13 @@ def editor(job_id):
                         f"OutlineColour={html_to_ass_color(sub_stroke)},"
                         f"Outline={sub_outline_w},Alignment=2,MarginV={sub_y}"
                     )
-                vf_parts.append(f"subtitles='{ass_abs}':force_style='{sub_style}'")
+                    if sub_bold_flag:
+                        sub_style += f",{sub_bold_flag}"
+                    sub_letter_sp = int(job.get('sub_letter_spacing', 0) or 0)
+                    if sub_letter_sp:
+                        sub_style += f",Spacing={sub_letter_sp}"
+                fonts_dir_esc = FONTS_DIR.replace('\\', '/').replace(':', '\\:')
+                vf_parts.append(f"subtitles='{ass_abs}':fontsdir='{fonts_dir_esc}':force_style='{sub_style}'")
             else:
                 # Fall back to plain SRT when no ASS file exists
                 srt_abs = srt_path.replace('\\', '/').replace(':', '\\:')
@@ -1554,6 +1811,8 @@ def editor(job_id):
                         f"BorderStyle=3,Outline={sub_outline_w},Shadow=1,"
                         f"Alignment=2,MarginV={sub_y}"
                     )
+                    if sub_bold_flag:
+                        sub_style += f",{sub_bold_flag}"
                 else:
                     sub_style = (
                         f"FontName={effective_sub_font},FontSize={sub_size},"
@@ -1561,31 +1820,57 @@ def editor(job_id):
                         f"OutlineColour={html_to_ass_color(sub_stroke)},"
                         f"Outline={sub_outline_w},Alignment=2,MarginV={sub_y}"
                     )
-                vf_parts.append(f"subtitles='{srt_abs}':force_style='{sub_style}'")
+                    if sub_bold_flag:
+                        sub_style += f",{sub_bold_flag}"
+                sub_letter_sp = int(job.get('sub_letter_spacing', 0) or 0)
+                if sub_letter_sp:
+                    sub_style += f",Spacing={sub_letter_sp}"
+                vf_parts.append(f"subtitles='{srt_abs}':fontsdir='{fonts_dir_esc}':force_style='{sub_style}'")
 
         if has_title:
             effective_title_font = title_font
             if title_bold and not effective_title_font.endswith(' Bold'):
                 effective_title_font = f"{effective_title_font} Bold"
             font_file = FONT_MAP.get(effective_title_font) or FONT_MAP.get(title_font) or 'C:/Windows/Fonts/arial.ttf'
-            font_esc  = font_file.replace(':', '\\:')
-            # Write title text to a UTF-8 file so drawtext handles any Unicode
-            # (Romanian diacritics, etc.) without encoding issues on Windows.
-            title_txt_name = f"job_{job_id}_title.txt"
-            title_txt_path = os.path.join(DOWNLOADS_DIR, title_txt_name)
-            with open(title_txt_path, 'w', encoding='utf-8') as _tf:
-                _tf.write(title_text)
-            title_txt_esc = title_txt_path.replace('\\', '/').replace(':', '\\:')
+            font_esc  = font_file.replace('\\', '/').replace(':', '\\:')
             tc  = html_to_drawtext_color(title_color)
             sc  = html_to_drawtext_color(title_stroke)
             bw  = max(1, int(title_size) // 14)
-            title_y_top = max(0, int(title_y) - round(int(title_size) * 0.78))
-            vf_parts.append(
-                f"drawtext=fontfile='{font_esc}':textfile='{title_txt_esc}'"
-                f":fontsize={title_size}:fontcolor={tc}"
-                f":x={title_x}:y={title_y_top}"
-                f":bordercolor={sc}:borderw={bw}"
-            )
+            title_line_sp   = int(job.get('title_line_spacing', 0) or 0)
+            title_letter_sp = float(job.get('title_letter_spacing', 0) or 0)
+
+            # Render each line as its own drawtext filter.
+            # FFmpeg y = top of glyph bounding box = title_y stored from canvas drag.
+            # Line step = fontSize*1.2 + userLineSpacing, matching the canvas lh formula.
+            # This avoids FFmpeg `line_spacing` entirely (font-metric-dependent, unreliable).
+            title_lines = title_text.split('\n')
+            # line height: same formula as canvas lh = fontSize*1.2 + userLineSpacing
+            lh = int(int(title_size) * 1.2) + title_line_sp
+
+            for i, line in enumerate(title_lines):
+                if not line:    # blank lines: just advance Y, no filter needed
+                    continue
+                # Write each line to its own tiny temp file (handles Unicode safely)
+                line_txt_name = f"job_{job_id}_title_line{i}.txt"
+                line_txt_path = os.path.join(DOWNLOADS_DIR, line_txt_name)
+                with open(line_txt_path, 'w', encoding='utf-8') as _lf:
+                    _lf.write(line)
+                line_txt_esc = line_txt_path.replace('\\', '/').replace(':', '\\:')
+
+                # FFmpeg drawtext y = top of the glyph ascender = top of the bounding
+                # box, which is exactly title_y as stored from the canvas drag.
+                # No ascent offset is needed: the canvas stores titlePos.y as the top
+                # of the box; FFmpeg y is also the top of the box.
+                line_y = max(0, int(title_y) + i * lh)
+                drawtext_opts = (
+                    f"drawtext=fontfile='{font_esc}':textfile='{line_txt_esc}'"
+                    f":fontsize={title_size}:fontcolor={tc}"
+                    f":x={title_x}:y={line_y}"
+                    f":box=0:bordercolor={sc}:borderw={bw}"
+                )
+                if title_letter_sp and drawtext_supports_letter_spacing():
+                    drawtext_opts += f":letter_spacing={title_letter_sp}"
+                vf_parts.append(drawtext_opts)
 
         # Always write the filter graph to a script file and use
         # -filter_complex_script so Windows never interprets special characters
@@ -1593,22 +1878,34 @@ def editor(job_id):
         fc_script_name = f"job_{job_id}_fc.txt"
         fc_script_path = os.path.join(DOWNLOADS_DIR, fc_script_name)
 
-        render_quality = VIDEO_QUALITY
+        render_quality = list(VIDEO_QUALITY)
         if gpu_mode == 'auto':
             selected_gpu = select_auto_gpu_encoder()
             if selected_gpu:
-                render_quality = GPU_ENCODER_QUALITY[selected_gpu]
+                render_quality = list(GPU_ENCODER_QUALITY[selected_gpu])
                 update_job(job_id, log=f"auto GPU mode selected {selected_gpu}")
             else:
                 update_job(job_id, log="auto GPU mode selected but no supported encoder found, using CPU")
                 flash('No supported GPU encoder found; using CPU encoder instead.', 'warning')
         elif gpu_mode in GPU_ENCODER_QUALITY:
             if ffmpeg_supports_encoder(gpu_mode):
-                render_quality = GPU_ENCODER_QUALITY[gpu_mode]
+                render_quality = list(GPU_ENCODER_QUALITY[gpu_mode])
                 update_job(job_id, log=f"using GPU encoder {gpu_mode}")
             else:
                 update_job(job_id, log=f"GPU encoder {gpu_mode} unavailable, falling back to CPU")
                 flash('Requested GPU render mode unavailable; using CPU encoder instead.', 'warning')
+        # ── apply user export overrides ──────────────────────────────────
+        export_fps = job.get('export_fps', '').strip()
+        export_bitrate = job.get('export_bitrate', '').strip()
+        export_res_w = job.get('export_res_w', '').strip()
+        export_res_h = job.get('export_res_h', '').strip()
+        if export_fps:
+            render_quality.insert(0, '-r'); render_quality.insert(1, export_fps)
+        if export_bitrate:
+            render_quality.insert(0, '-b:v'); render_quality.insert(1, export_bitrate)
+        if export_res_w and export_res_h:
+            scale_filter = f"scale={export_res_w}:{export_res_h}:force_original_aspect_ratio=decrease,pad={export_res_w}:{export_res_h}:(ow-iw)/2:(oh-ih)/2"
+            vf_parts.insert(0, scale_filter)  # always prepend so it applies first
 
         if has_overlay:
             ov_scale = f"[1:v]scale={overlay_w}:{overlay_h}[ov]"
@@ -1629,33 +1926,52 @@ def editor(job_id):
             with open(fc_script_path, 'w', encoding='utf-8') as _fc:
                 _fc.write(fc)
             update_job(job_id, log=f"filter_complex (overlay): {fc}")
-            cmd = [
-                'ffmpeg', '-nostdin', '-y', '-fontsdir', FONTS_DIR,
-                '-i', orig_video, '-i', overlay_path,
-                '-filter_complex_script', fc_script_name,
-                '-map', out_label, '-map', '0:a?',
-                *render_quality, '-c:a', 'copy', new_video_name,
-            ]
+            if ffmpeg_supports_filter_complex_script():
+                cmd = [
+                    'ffmpeg', '-nostdin', '-y',
+                    '-i', orig_video, '-i', overlay_path,
+                    '-filter_complex_script', fc_script_name,
+                    '-map', out_label, '-map', '0:a?',
+                    *render_quality, '-c:a', 'copy', new_video_name,
+                ]
+            else:
+                cmd = [
+                    'ffmpeg', '-nostdin', '-y',
+                    '-i', orig_video, '-i', overlay_path,
+                    '-filter_complex', fc,
+                    '-map', out_label, '-map', '0:a?',
+                    *render_quality, '-c:a', 'copy', new_video_name,
+                ]
         elif vf_parts:
             vf_chain = ','.join(vf_parts)
             fc = f"[0:v]{vf_chain}[vout]"
             with open(fc_script_path, 'w', encoding='utf-8') as _fc:
                 _fc.write(fc)
             update_job(job_id, log=f"filter_complex (no overlay): {fc}")
-            cmd = [
-                'ffmpeg', '-nostdin', '-y', '-fontsdir', FONTS_DIR,
-                '-i', orig_video,
-                '-filter_complex_script', fc_script_name,
-                '-map', '[vout]', '-map', '0:a?',
-                *render_quality, '-c:a', 'copy', new_video_name,
-            ]
+            if ffmpeg_supports_filter_complex_script():
+                cmd = [
+                    'ffmpeg', '-nostdin', '-y', '-fontsdir', FONTS_DIR,
+                    '-i', orig_video,
+                    '-filter_complex_script', fc_script_name,
+                    '-map', '[vout]', '-map', '0:a?',
+                    *render_quality, '-c:a', 'copy', new_video_name,
+                ]
+            else:
+                cmd = [
+                    'ffmpeg', '-nostdin', '-y', '-fontsdir', FONTS_DIR,
+                    '-i', orig_video,
+                    '-filter_complex', fc,
+                    '-map', '[vout]', '-map', '0:a?',
+                    *render_quality, '-c:a', 'copy', new_video_name,
+                ]
         else:
-            cmd = ['ffmpeg', '-nostdin', '-y', '-fontsdir', FONTS_DIR,
+            cmd = ['ffmpeg', '-nostdin', '-y',
                    '-i', orig_video,
                    *render_quality, '-c:a', 'copy', new_video_name]
 
         update_job(job_id, log=f"ffmpeg: {' '.join(cmd)}")
-        result = subprocess.run(cmd, cwd=DOWNLOADS_DIR, capture_output=True, text=True)
+        result = subprocess.run(cmd, cwd=DOWNLOADS_DIR, capture_output=True, text=True,
+                                encoding='utf-8', errors='replace', env=ffmpeg_env())
         if result.returncode != 0:
             update_job(job_id, log=f"ffmpeg stderr: {result.stderr[-600:]}")
             flash('Render failed — check server logs for details.', 'danger')

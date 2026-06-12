@@ -3,6 +3,32 @@ import glob
 import re
 import whisper
 from moviepy import VideoFileClip
+import sys
+import io
+
+# 1. Force standard I/O streams to use UTF-8 cross-platform safely
+if sys.platform.startswith('win'):
+    # Reconfigure the existing streams rather than replacing the wrapper wrappers entirely
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    else:
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
+# 2. Defensive handling directly on your logging line (Line 277)
+# Replace your current print statement with this safely handled variant:
+def safe_print_video_path(video_path):
+    try:
+        print(f"Processing video: {video_path}")
+    except UnicodeEncodeError:
+        # Fallback for old Windows consoles that fundamentally reject unicode transfers
+        clean_path = video_path.encode('utf-8', errors='replace').decode('utf-8', errors='replace')
+        # If even that chokes on standard stdout, fallback to ascii sanitization
+        try:
+            print(f"Processing video: {clean_path}")
+        except UnicodeEncodeError:
+            print(f"Processing video: {video_path.encode('ascii', errors='replace').decode('ascii')}")
 
 def extract_audio(video_path, audio_path):
     """
@@ -274,7 +300,7 @@ def process_video(video_path, model, output_folder, max_length):
     ass_path = os.path.join(output_folder, ass_filename)
     audio_path = os.path.join(output_folder, f"{name}_temp_audio.wav")
     
-    print(f"Processing video: {video_path}")
+    safe_print_video_path(video_path)
     extract_audio(video_path, audio_path)
     
     # Transcribe the audio using Whisper (with word-level timestamps) in Romanian.

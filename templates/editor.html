@@ -10,83 +10,143 @@
     font-display: swap;
   }
 {% endfor %}
-  #previewCanvas { display:block; width:100%; height:auto; max-height:70vh; background:#000; border-radius:10px; cursor:crosshair; border:1px solid var(--border); object-fit:contain; }
-  .tab-content.bordered { border:1px solid var(--border); border-top:none; border-radius:0 0 10px 10px; background:var(--surface); }
-  .form-control-color { height:40px; padding:3px 5px; min-width:60px; }
-  .size-row { display:flex; align-items:center; gap:8px; }
-  .size-row input[type=range] { flex:1; accent-color:var(--accent); }
-  .size-row input[type=number] { width:72px; }
-  #subtitleDisplay .highlight { background: #e5b800; color: #000; border-radius:3px; padding:0 2px; }
-  .template-bar {
-    display:flex; align-items:center; gap:8px; flex-wrap:wrap;
-    padding:10px 14px; background:var(--surface); border:1px solid var(--border);
-    border-radius:10px; margin-bottom:14px;
+  :root {
+    --editor-radius: 10px;
+    --editor-gap: 10px;
   }
-  .template-bar .section-title { margin-bottom:0; margin-right:6px; }
+  #previewCanvas {
+    display:block; width:100%; height:auto; max-height:65vh;
+    background:#000; border-radius:var(--editor-radius);
+    cursor:crosshair; border:2px solid var(--border);
+    object-fit:contain;
+  }
+  .control-section {
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:var(--editor-radius); padding:14px; margin-bottom:var(--editor-gap);
+  }
+  .control-section h6 {
+    font-weight:600; font-size:0.85rem; letter-spacing:0.02em;
+    margin-bottom:10px; color:var(--text-muted); text-transform:uppercase;
+  }
+  .form-control-color { height:38px; padding:2px 4px; min-width:52px; }
+  .color-swatch {
+    display:inline-flex; align-items:center; gap:4px;
+  }
+  .color-swatch input[type=color] { width:32px; height:32px; padding:0; border-radius:6px; }
+  .color-swatch label { font-size:0.72rem; color:var(--text-muted); margin:0; }
+  .size-row { display:flex; align-items:center; gap:6px; }
+  .size-row input[type=range] { flex:1; accent-color:var(--accent); }
+  .size-row input[type=number] { width:64px; }
+  .field-group {
+    background:var(--surface2); border-radius:8px; padding:10px 12px; margin-bottom:8px;
+  }
+  .field-group label { font-size:0.75rem; color:var(--text-muted); margin-bottom:2px; font-weight:500; }
+  .template-bar {
+    display:flex; align-items:center; gap:6px; flex-wrap:wrap;
+    padding:8px 12px; background:var(--surface); border:1px solid var(--border);
+    border-radius:var(--editor-radius); margin-bottom:10px;
+  }
   .layer-btn-group .btn {
-    font-size:0.78rem; padding:3px 10px; border-radius:6px;
+    font-size:0.72rem; padding:3px 10px; border-radius:6px;
     background:var(--surface2); color:var(--text-muted); border:1px solid var(--border);
   }
   .layer-btn-group .btn.active {
     background:var(--accent); color:#fff; border-color:var(--accent);
   }
-  #canvasControls { pointer-events:none; transition:opacity .3s; }
-  #canvasControls.show { opacity:1; }
-  #canvasControls.hide { opacity:0; }
-  .empty-state { text-align:center; padding:30px; color:var(--text-muted); }
-  .empty-state i { font-size:2.5rem; opacity:.4; }
-  .control-panel { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:14px; margin-bottom:10px; }
+  .btn-icon { padding:4px 8px; font-size:0.85rem; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:12px; font-size:0.7rem; background:var(--surface2); color:var(--text-muted); }
+  .sub-preview-box {
+    background:#0d1117; border:1px solid var(--border); border-radius:8px; padding:10px;
+    min-height:2.5em; font-size:0.9rem; color:#c9d1d9;
+  }
+  .sub-preview-box .highlight {
+    background: #e5b800; color: #000; border-radius:3px; padding:0 3px;
+  }
+  #srtTextarea {
+    font-size:0.74rem; background:#0d1117; color:#c9d1d9;
+    font-family:'SF Mono','Fira Code','Consolas',monospace;
+  }
+  /* ── compact redesign ── */
+  .ctrl-section {
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:8px; padding:8px 10px; margin-bottom:6px;
+  }
+  .ctrl-section .section-header {
+    display:flex; align-items:center; gap:6px;
+    font-weight:600; font-size:0.78rem; letter-spacing:0.02em;
+    color:var(--text-muted); text-transform:uppercase; cursor:pointer;
+    user-select:none; margin-bottom:0;
+  }
+  .ctrl-section .section-header.collapsed { margin-bottom:0; }
+  .ctrl-section .section-header .collapse-icon { font-size:0.65rem; transition:transform 0.2s; }
+  .ctrl-section .section-header.collapsed .collapse-icon { transform:rotate(-90deg); }
+  .ctrl-section .section-body { margin-top:6px; }
+  .ctrl-row {
+    display:flex; align-items:flex-end; gap:6px; flex-wrap:wrap;
+    margin-bottom:4px;
+  }
+  .ctrl-row:last-child { margin-bottom:0; }
+  .ctrl-row label {
+    font-size:0.68rem; color:var(--text-muted); margin-bottom:1px; font-weight:500;
+    white-space:nowrap;
+  }
+  .ctrl-row .form-control-sm, .ctrl-row .form-select-sm { font-size:0.75rem; }
+  .sp-num { width:58px !important; }
+  .sp-color { height:28px; padding:1px 3px; min-width:40px; }
+  .sp-swatch { display:inline-flex; align-items:center; gap:3px; }
+  .sp-swatch input[type=color] { width:28px; height:28px; padding:0; border-radius:5px; }
+  .sp-swatch label { font-size:0.65rem; }
+  .sp-divider { width:1px; background:var(--border); align-self:stretch; margin:0 2px; }
 </style>
 
-<div class="d-flex flex-wrap justify-content-between align-items-center mb-3">
+<div class="d-flex flex-wrap justify-content-between align-items-center mb-2">
   <div>
-    <h4 class="mb-0 fw-bold" style="letter-spacing:-0.02em;">
-      <i class="bi bi-film"></i> Edit Clip
+    <h5 class="mb-0 fw-bold" style="letter-spacing:-0.02em;">
+      <i class="bi bi-film"></i> Editor
       <span class="text-muted fw-normal fs-6 ms-2">{{ job_key }}</span>
-    </h4>
+    </h5>
   </div>
-  <div class="d-flex gap-2 mt-2 mt-md-0">
+  <div class="d-flex gap-2 mt-1 mt-md-0">
     <a href="/download/{{ job.video }}" class="btn btn-sm" style="background:var(--accent2);color:#fff;">
       <i class="bi bi-download"></i> Download
     </a>
     <a href="{{ url_for('video_cut') }}" class="btn btn-sm btn-outline-secondary">
-      <i class="bi bi-arrow-left"></i> Back
+      <i class="bi bi-plus-lg"></i> New
     </a>
   </div>
 </div>
 
-<!-- ══════════ TEMPLATE / PRESET BAR ══════════ -->
+<!-- Template bar -->
 <div class="template-bar">
-  <span class="section-title"><i class="bi bi-layers"></i> Template</span>
-  <select id="templateSelect" class="form-select form-select-sm" style="width:auto;min-width:160px;">
-    <option value="">— no template —</option>
+  <span class="fw-semibold small me-1"><i class="bi bi-layers"></i></span>
+  <select id="templateSelect" class="form-select form-select-sm" style="width:auto;min-width:140px;">
+    <option value="">— Presets —</option>
     {% for t in templates %}
     <option value="{{ t.name }}">{{ t.name }}</option>
     {% endfor %}
   </select>
-  <button class="btn btn-sm btn-outline-secondary" id="loadTemplateBtn" title="Load selected template">
-    <i class="bi bi-box-arrow-in-down"></i> Load
-  </button>
-  <button class="btn btn-sm btn-outline-secondary" id="saveTemplateBtn" title="Save current settings as template">
-    <i class="bi bi-save"></i> Save As...
-  </button>
-  <button class="btn btn-sm btn-outline-danger" id="deleteTemplateBtn" title="Delete selected template">
-    <i class="bi bi-trash"></i>
-  </button>
-  <span id="templateMsg" class="small" style="margin-left:4px;"></span>
+  <button class="btn btn-sm btn-outline-secondary btn-icon" id="loadTemplateBtn" title="Load"><i class="bi bi-box-arrow-in-down"></i></button>
+  <button class="btn btn-sm btn-outline-secondary btn-icon" id="saveTemplateBtn" title="Save as preset"><i class="bi bi-save"></i></button>
+  <button class="btn btn-sm btn-outline-danger btn-icon" id="deleteTemplateBtn" title="Delete preset"><i class="bi bi-trash"></i></button>
+  <span id="templateMsg" class="small ms-1"></span>
 </div>
 
-<div class="row g-3">
+<form method="post" enctype="multipart/form-data" id="editForm" novalidate>
+  <!-- Hidden fields -->
+  <input type="hidden" name="overlay_x" id="overlayX" value="{{ job.overlay_x or 10 }}">
+  <input type="hidden" name="overlay_y" id="overlayY" value="{{ job.overlay_y or 10 }}">
+  <input type="hidden" name="title_x"   id="titleX"   value="{{ job.title_x or 10 }}">
+  <input type="hidden" name="title_y"   id="titleY"   value="{{ job.title_y or 80 }}">
+  <input type="hidden" name="sub_y"     id="subY"     value="{{ job.sub_y or 30 }}">
+  <input type="hidden" name="preview_w" id="previewW" value="{{ job.preview_w or 0 }}">
+  <input type="hidden" name="preview_h" id="previewH" value="{{ job.preview_h or 0 }}">
+  <input type="hidden" name="current_overlay_file" id="currentOverlayFile" value="{{ job.overlay or '' }}">
+  <input type="hidden" name="gpu_mode" id="gpuMode" value="{{ job.gpu_mode or 'auto' }}">
 
-  <!-- ══════════ LEFT: canvas preview + video player ══════════ -->
-  <div class="col-xl-5 col-lg-6">
-    <div class="card mb-2">
-      <div class="card-header py-2 d-flex justify-content-between align-items-center">
-        <span class="fw-semibold"><i class="bi bi-play-btn"></i> Live Preview</span>
-        <small class="text-muted d-none d-md-block">Drag elements on canvas to reposition</small>
-      </div>
-      <div class="card-body p-0 position-relative">
-        <!-- layer selector -->
+  <div class="row g-2">
+    <!-- LEFT: Canvas Preview -->
+    <div class="col-xl-5 col-lg-6">
+      <div class="position-relative mb-2">
         <div class="position-absolute top-0 start-0 m-2" style="z-index:10;">
           <div class="btn-group btn-group-sm layer-btn-group" role="group">
             <input type="radio" class="btn-check" name="layer" id="layerOverlay" autocomplete="off" checked>
@@ -100,314 +160,264 @@
         <canvas id="previewCanvas"></canvas>
         <div id="canvasControls" class="position-absolute top-50 start-50 translate-middle show"
              style="pointer-events:none;">
-          <button id="playPauseBtn" class="btn btn-sm btn-light rounded-circle shadow"
-                  style="pointer-events:auto; width:44px; height:44px; opacity:0.85;">
+          <button type="button" id="playPauseBtn" class="btn btn-sm btn-light rounded-circle shadow"
+                  style="pointer-events:auto; width:40px; height:40px; opacity:0.85;">
             <i class="bi bi-play-fill fs-5"></i>
           </button>
         </div>
       </div>
+      <!-- Subtitle navigation + slider -->
+      <div class="d-flex align-items-center gap-2 mb-2 control-section py-2">
+        <button type="button" id="prevSubBtn" class="btn btn-sm btn-outline-secondary btn-icon" title="Previous"><i class="bi bi-skip-backward-fill"></i></button>
+        <button type="button" id="playBtn" class="btn btn-sm btn-outline-secondary btn-icon" title="Play"><i class="bi bi-play-fill"></i></button>
+        <button type="button" id="pauseBtn" class="btn btn-sm btn-outline-secondary btn-icon" title="Pause"><i class="bi bi-pause-fill"></i></button>
+        <button type="button" id="nextSubBtn" class="btn btn-sm btn-outline-secondary btn-icon" title="Next"><i class="bi bi-skip-forward-fill"></i></button>
+        <input type="range" id="timeSlider" min="0" max="0" step="0.01" class="form-range flex-grow-1" style="accent-color:var(--accent);">
+      </div>
+
+      <!-- Subtitle live editor -->
+      <div class="control-section">
+        <div class="d-flex justify-content-between align-items-center mb-1">
+          <label class="small fw-semibold text-muted text-uppercase">Live subtitle</label>
+          <button type="button" id="highlightBtn" class="btn btn-sm btn-outline-warning btn-icon" title="Highlight selection"><i class="bi bi-highlighter"></i></button>
+        </div>
+        <div id="subtitleDisplay" class="sub-preview-box" contenteditable="true" spellcheck="false"></div>
+        <div id="highlightList" class="d-flex flex-wrap gap-1 mt-1"></div>
+      </div>
+
+      <!-- Rendered output -->
+      {% if job.video != (job.base_video or job.video) %}
+      <div class="control-section">
+        <label class="small fw-semibold text-muted text-uppercase"><i class="bi bi-check-circle"></i> Last render</label>
+        <video controls style="width:100%; border-radius:8px; margin-top:6px;">
+          <source src="/download/{{ job.video }}" type="video/mp4">
+        </video>
+      </div>
+      {% endif %}
     </div>
-    <video id="sourceVideo" controls preload="auto" crossorigin="anonymous"
-           style="position:absolute; top:0; left:0; width:1px; height:1px; opacity:0; pointer-events:none;">
-      <source src="/preview/{{ job.base_video or job.video }}" type="video/mp4">
-    </video>
-    {% if job.video != (job.base_video or job.video) %}
-    <div class="control-panel">
-      <span class="section-title"><i class="bi bi-check-circle"></i> Last Rendered Output</span>
-      <video controls style="width:100%; border-radius:8px;">
-        <source src="/download/{{ job.video }}" type="video/mp4">
-      </video>
-    </div>
-    {% endif %}
-  </div>
 
-  <!-- ══════════ RIGHT: tabbed controls ══════════ -->
-  <div class="col-xl-7 col-lg-6">
-    <form method="post" enctype="multipart/form-data" id="editForm" novalidate>
-      <!-- Hidden position fields -->
-      <input type="hidden" name="overlay_x" id="overlayX" value="{{ job.overlay_x or 10 }}">
-      <input type="hidden" name="overlay_y" id="overlayY" value="{{ job.overlay_y or 10 }}">
-      <input type="hidden" name="title_x"   id="titleX"   value="{{ job.title_x or 10 }}">
-      <input type="hidden" name="title_y"   id="titleY"   value="{{ job.title_y or 80 }}">
-      <input type="hidden" name="sub_y"     id="subY"     value="{{ job.sub_y or 30 }}">
-      <input type="hidden" name="preview_w" id="previewW" value="{{ job.preview_w or 0 }}">
-      <input type="hidden" name="preview_h" id="previewH" value="{{ job.preview_h or 0 }}">
-      <input type="hidden" name="current_overlay_file" id="currentOverlayFile" value="{{ job.overlay or '' }}">
+    <!-- RIGHT: Controls -->
+    <div class="col-xl-7 col-lg-6">
 
-      <ul class="nav nav-tabs" id="editorTabs" role="tablist">
-        <li class="nav-item">
-          <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-overlay" type="button">
-            <i class="bi bi-image"></i> Overlay
-          </button>
-        </li>
-        <li class="nav-item">
-          <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-title" type="button">
-            <i class="bi bi-fonts"></i> Title
-          </button>
-        </li>
-        <li class="nav-item">
-          <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-subs" type="button">
-            <i class="bi bi-card-text"></i> Subtitles
-          </button>
-        </li>
-      </ul>
-
-      <div class="tab-content bordered p-3 mb-3">
-
-        <!-- ─── OVERLAY TAB ─── -->
-        <div class="tab-pane fade show active" id="tab-overlay">
-          <div class="mb-3">
-            <label class="form-label fw-semibold">Logo / Watermark <span class="text-muted fw-normal">(PNG with transparency)</span></label>
-            <input type="file" name="overlay" class="form-control" accept="image/*" id="overlayInput">
-          </div>
-          <div class="mb-3">
-            <label class="form-label fw-semibold">Custom fonts</label>
-            <div class="row g-2 align-items-end">
-              <div class="col-md-7">
-                <input type="file" name="font_file" class="form-control" accept=".ttf,.otf" id="fontUploadInput">
-              </div>
-              <div class="col-md-5">
-                <button type="submit" name="download_fonts" value="1" class="btn btn-sm btn-outline-primary w-100">
-                  <i class="bi bi-download"></i> Download Inter fonts
-                </button>
-              </div>
+      <!-- OVERLAY (collapsible) -->
+      <div class="ctrl-section">
+        <div class="section-header" onclick="this.classList.toggle('collapsed'); this.nextElementSibling.classList.toggle('d-none')">
+          <i class="bi bi-image"></i> Overlay / Logo <i class="bi bi-chevron-down collapse-icon ms-auto"></i>
+        </div>
+        <div class="section-body">
+          <div class="ctrl-row">
+            <div style="flex:1;min-width:120px;">
+              <label>Image (PNG)</label>
+              <input type="file" name="overlay" class="form-control form-control-sm" accept="image/*" id="overlayInput">
             </div>
-            <small class="text-muted">Upload a .ttf/.otf file to add it to the editor font list, or download Inter if not present.</small>
+            <div style="width:62px;"><label>W</label>
+              <input type="number" name="overlay_w" id="overlayW" class="form-control form-control-sm"
+                     value="{{ job.overlay_w or '' }}" placeholder="auto" min="10"></div>
+            <div style="width:62px;"><label>H</label>
+              <input type="number" name="overlay_h" id="overlayH" class="form-control form-control-sm"
+                     value="{{ job.overlay_h or '' }}" placeholder="auto" min="10"></div>
+            <div class="form-check" style="margin-bottom:2px;">
+              <input type="checkbox" class="form-check-input" id="lockAspect" checked>
+              <label class="form-check-label" style="font-size:0.65rem;" for="lockAspect">Lock</label>
+            </div>
           </div>
           {% if job.overlay %}
-          <div class="mb-2">
-            <span class="badge" style="background:var(--accent2);">{{ job.overlay }}</span>
-            <small class="text-muted ms-1">loaded — drag on preview to reposition</small>
-          </div>
+          <span class="pill mt-1"><i class="bi bi-image"></i> {{ job.overlay }}</span>
           {% endif %}
-          <div class="row g-2 mb-1">
-            <div class="col-5">
-              <label class="form-label small">Width (px)</label>
-              <input type="number" name="overlay_w" id="overlayW" class="form-control form-control-sm"
-                     value="{{ job.overlay_w or '' }}" placeholder="auto" min="10" max="3840">
-            </div>
-            <div class="col-5">
-              <label class="form-label small">Height (px)</label>
-              <input type="number" name="overlay_h" id="overlayH" class="form-control form-control-sm"
-                     value="{{ job.overlay_h or '' }}" placeholder="auto" min="10" max="3840">
-            </div>
-            <div class="col-2 d-flex align-items-end pb-1">
-              <div class="form-check">
-                <input type="checkbox" class="form-check-input" id="lockAspect" checked>
-                <label class="form-check-label small" for="lockAspect">Lock</label>
-              </div>
-            </div>
-          </div>
-          <div class="mb-3">
-            <small class="text-muted">Use the yellow corner handle on the preview canvas to resize the overlay, or enter explicit width/height values.</small>
-          </div>
+          <small class="text-muted d-block" style="font-size:0.65rem;">Drag logo on canvas. Yellow corner = resize.</small>
         </div>
+      </div>
 
-        <!-- ─── TITLE / TEXT TAB ─── -->
-        <div class="tab-pane fade" id="tab-title">
-          <div class="mb-3">
-            <label class="form-label fw-semibold">Title text</label>
-            <input type="text" name="title_text" id="titleText" class="form-control"
-                   value="{{ job.title_text or '' }}" placeholder="Enter title or leave blank to skip">
-          </div>
-          <div class="row g-2 mb-2">
-            <div class="col-md-4">
-              <label class="form-label small">Font</label>
+      <!-- TITLE -->
+      <div class="ctrl-section">
+        <div class="section-header" onclick="this.classList.toggle('collapsed'); this.nextElementSibling.classList.toggle('d-none')">
+          <i class="bi bi-fonts"></i> Title <i class="bi bi-chevron-down collapse-icon ms-auto"></i>
+        </div>
+        <div class="section-body">
+          <textarea name="title_text" id="titleText" class="form-control form-control-sm mb-1" rows="2"
+                    placeholder="Enter title text..." style="resize:vertical;">{{ job.title_text or '' }}</textarea>
+          <div class="ctrl-row">
+            <div style="flex:1;min-width:90px;"><label>Font</label>
               <select name="title_font" id="titleFont" class="form-select form-select-sm">
                 {% for font in font_list %}
                 <option value="{{ font }}" {% if job.title_font == font %}selected{% endif %}>{{ font }}</option>
                 {% endfor %}
               </select>
             </div>
-            <div class="col-md-2 d-flex align-items-center">
-              <div class="form-check mt-4">
-                <input class="form-check-input" type="checkbox" value="1" id="titleBold" name="title_bold" {% if job.title_bold %}checked{% endif %}>
-                <label class="form-check-label small" for="titleBold">Bold</label>
-              </div>
+            <div class="form-check" style="margin-bottom:2px;">
+              <input class="form-check-input" type="checkbox" value="1" id="titleBold" name="title_bold" {% if job.title_bold %}checked{% endif %}>
+              <label class="form-check-label" style="font-size:0.65rem;" for="titleBold">Bold</label>
             </div>
-            <div class="col-md-3">
-              <label class="form-label small">Size (px)</label>
+            <div style="flex:1;min-width:80px;"><label>Size</label>
               <div class="size-row">
                 <input type="range" id="titleSizeRange" min="8" max="200" value="{{ job.title_size or 48 }}">
-                <input type="number" name="title_size" id="titleSize" class="form-control form-control-sm"
+                <input type="number" name="title_size" id="titleSize" class="form-control form-control-sm sp-num"
                        value="{{ job.title_size or 48 }}" min="8" max="200">
               </div>
             </div>
-            <div class="col-md-3">
-              <label class="form-label small">Color</label>
-              <input type="color" name="title_color" id="titleColor"
-                     class="form-control form-control-color w-100"
-                     value="{{ job.title_color or '#ffffff' }}">
-            </div>
-            <div class="col-md-2">
-              <label class="form-label small">Outline</label>
-              <input type="color" name="title_stroke_color" id="titleStrokeColor"
-                     class="form-control form-control-color w-100"
-                     value="{{ job.title_stroke_color or '#000000' }}">
-            </div>
+            <div class="sp-swatch"><input type="color" name="title_color" id="titleColor" value="{{ job.title_color or '#ffffff' }}"><label>Fill</label></div>
+            <div class="sp-swatch"><input type="color" name="title_stroke_color" id="titleStrokeColor" value="{{ job.title_stroke_color or '#000000' }}"><label>Outline</label></div>
           </div>
-          <div class="row g-2 mb-2">
-            <div class="col-md-6">
-              <label class="form-label small">Render mode</label>
-              <select name="gpu_mode" id="gpuMode" class="form-select form-select-sm">
-                <option value="auto" {% if job.gpu_mode == 'auto' %}selected{% endif %}>Auto (GPU if available, otherwise CPU)</option>
-                <option value="cpu" {% if job.gpu_mode != 'h264_nvenc' and job.gpu_mode != 'hevc_nvenc' and job.gpu_mode != 'auto' %}selected{% endif %}>CPU (libx264)</option>
-                <option value="h264_nvenc" {% if job.gpu_mode == 'h264_nvenc' %}selected{% endif %}>NVIDIA h264_nvenc</option>
-                <option value="hevc_nvenc" {% if job.gpu_mode == 'hevc_nvenc' %}selected{% endif %}>NVIDIA hevc_nvenc</option>
+          <div class="ctrl-row">
+            <div style="width:58px;"><label>Line&nbsp;sp</label>
+              <input type="number" name="title_line_spacing" id="titleLineSpacing" class="form-control form-control-sm"
+                     value="{{ job.title_line_spacing or 0 }}" min="-20" max="100" step="1">
+            </div>
+            <div style="width:58px;"><label>Letter&nbsp;sp</label>
+              <input type="number" name="title_letter_spacing" id="titleLetterSpacing" class="form-control form-control-sm"
+                     value="{{ job.title_letter_spacing or 0 }}" min="-5" max="50" step="0.5">
+            </div>
+            <div style="flex:1;min-width:80px;"><label>GPU</label>
+              <select name="gpu_mode_ui" id="gpuModeUI" class="form-select form-select-sm" onchange="document.getElementById('gpuMode').value=this.value">
+                <option value="auto" {% if job.gpu_mode=='auto' %}selected{% endif %}>Auto</option>
+                <option value="cpu" {% if job.gpu_mode!='h264_nvenc' and job.gpu_mode!='hevc_nvenc' and job.gpu_mode!='auto' %}selected{% endif %}>CPU</option>
+                <option value="h264_nvenc" {% if job.gpu_mode=='h264_nvenc' %}selected{% endif %}>NVENC</option>
+                <option value="hevc_nvenc" {% if job.gpu_mode=='hevc_nvenc' %}selected{% endif %}>HEVC</option>
               </select>
-              <small class="text-muted">Use dedicated GPU if available.</small>
             </div>
           </div>
-          <small class="text-muted d-block mt-2">
-            <i class="bi bi-info-circle"></i> Drag the title on the preview canvas to position it.
-          </small>
+          <small class="text-muted" style="font-size:0.65rem;">Drag title on canvas to reposition.</small>
         </div>
+      </div>
 
-        <!-- ─── SUBTITLES TAB ─── -->
-        <div class="tab-pane fade" id="tab-subs">
-          <div class="row g-2 mb-2">
-            <div class="col-md-3">
-              <label class="form-label small">Font</label>
+      <!-- SUBTITLES -->
+      <div class="ctrl-section">
+        <div class="section-header" onclick="this.classList.toggle('collapsed'); this.nextElementSibling.classList.toggle('d-none')">
+          <i class="bi bi-card-text"></i> Subtitles <i class="bi bi-chevron-down collapse-icon ms-auto"></i>
+        </div>
+        <div class="section-body">
+          <!-- Import row -->
+          <div class="ctrl-row">
+            <div style="flex:1;min-width:140px;"><label>Import SRT/ASS</label>
+              <input type="file" name="subtitle_file" class="form-control form-control-sm" accept=".srt,.ass" id="subtitleFileInput">
+            </div>
+            <div style="flex:1;min-width:140px;"><label>Upload font (.ttf/.otf)</label>
+              <div class="input-group input-group-sm">
+                <input type="file" name="font_file" class="form-control" accept=".ttf,.otf" id="fontUploadInput">
+                <button type="submit" name="download_fonts" value="1" class="btn btn-outline-primary">Get Inter</button>
+              </div>
+            </div>
+          </div>
+          <!-- Font & size -->
+          <div class="ctrl-row">
+            <div style="flex:1;min-width:90px;"><label>Font</label>
               <select name="sub_font" id="subFont" class="form-select form-select-sm">
                 {% for font in font_list %}
                 <option value="{{ font }}" {% if job.sub_font == font %}selected{% endif %}>{{ font }}</option>
                 {% endfor %}
               </select>
             </div>
-            <div class="col-md-2 d-flex align-items-center">
-              <div class="form-check mt-4">
-                <input class="form-check-input" type="checkbox" value="1" id="subBold" name="sub_bold" {% if job.sub_bold %}checked{% endif %}>
-                <label class="form-check-label small" for="subBold">Bold</label>
-              </div>
+            <div class="form-check" style="margin-bottom:2px;">
+              <input class="form-check-input" type="checkbox" value="1" id="subBold" name="sub_bold" {% if job.sub_bold %}checked{% endif %}>
+              <label class="form-check-label" style="font-size:0.65rem;" for="subBold">Bold</label>
             </div>
-            <div class="col-md-2">
-              <label class="form-label small">Size (px)</label>
+            <div style="flex:1;min-width:80px;"><label>Size</label>
               <div class="size-row">
                 <input type="range" id="subSizeRange" min="8" max="100" value="{{ job.sub_size or 18 }}">
-                <input type="number" name="sub_size" id="subSize" class="form-control form-control-sm"
+                <input type="number" name="sub_size" id="subSize" class="form-control form-control-sm sp-num"
                        value="{{ job.sub_size or 18 }}" min="8" max="100">
               </div>
             </div>
-            <div class="col-md-2">
-              <label class="form-label small">Color</label>
-              <input type="color" name="sub_color" id="subColor"
-                     class="form-control form-control-color w-100"
-                     value="{{ job.sub_color or '#ffffff' }}">
-            </div>
-            <div class="col-md-2">
-              <label class="form-label small">HL BG</label>
-              <input type="color" name="sub_highlight_color" id="subHighlightColor"
-                     class="form-control form-control-color w-100"
-                     value="{{ job.sub_highlight_color or '#ffff00' }}">
-            </div>
-            <div class="col-md-2">
-              <label class="form-label small">HL text</label>
-              <input type="color" name="sub_highlight_text_color" id="subHighlightTextColor"
-                     class="form-control form-control-color w-100"
-                     value="{{ job.sub_highlight_text_color or '#000000' }}">
-            </div>
-            <div class="col-md-1">
-              <label class="form-label small">Pos</label>
+            <div style="width:58px;"><label>Pos</label>
               <input type="number" name="subYNum" id="subYNum" class="form-control form-control-sm"
                      value="{{ job.sub_y or 30 }}" min="0" max="500">
             </div>
           </div>
-          <!-- Outline & Background row -->
-          <div class="row g-2 mb-2 align-items-end">
-            <div class="col-md-3">
-              <label class="form-label small">Outline color</label>
-              <input type="color" name="sub_stroke_color" id="subStrokeColor"
-                     class="form-control form-control-color w-100"
-                     value="{{ job.sub_stroke_color or '#000000' }}">
-            </div>
-            <div class="col-md-2">
-              <label class="form-label small">Outline px</label>
+          <!-- Colors & outline -->
+          <div class="ctrl-row">
+            <div class="sp-swatch"><input type="color" name="sub_color" id="subColor" value="{{ job.sub_color or '#ffffff' }}"><label>Text</label></div>
+            <div class="sp-swatch"><input type="color" name="sub_stroke_color" id="subStrokeColor" value="{{ job.sub_stroke_color or '#000000' }}"><label>Outline</label></div>
+            <div style="width:52px;"><label>Out px</label>
               <input type="number" name="sub_outline_w" id="subOutlineW" class="form-control form-control-sm"
                      value="{{ job.sub_outline_w or 2 }}" min="0" max="20" step="0.5">
             </div>
-            <div class="col-md-2">
-              <div class="form-check mt-3">
-                <input type="checkbox" class="form-check-input" name="sub_bg_enabled" id="subBgEnabled"
-                       value="1" {% if job.sub_bg_enabled %}checked{% endif %}>
-                <label class="form-check-label small" for="subBgEnabled">Background</label>
-              </div>
+            <div style="width:58px;"><label>Line&nbsp;sp</label>
+              <input type="number" name="sub_line_spacing" id="subLineSpacing" class="form-control form-control-sm"
+                     value="{{ job.sub_line_spacing or 0 }}" min="-20" max="100" step="1">
             </div>
-            <div class="col-md-2">
-              <label class="form-label small">HL box px</label>
-              <input type="number" name="sub_hl_box" id="subHlBox" class="form-control form-control-sm"
-                     value="{{ job.sub_hl_box or 16 }}" min="2" max="60" step="0.5">
+            <div style="width:58px;"><label>Letter&nbsp;sp</label>
+              <input type="number" name="sub_letter_spacing" id="subLetterSpacing" class="form-control form-control-sm"
+                     value="{{ job.sub_letter_spacing or 0 }}" min="-5" max="50" step="0.5">
             </div>
-            <div class="col-md-3">
-              <label class="form-label small">BG color</label>
-              <input type="color" name="sub_bg_color" id="subBgColor"
-                     class="form-control form-control-color w-100"
-                     value="{{ job.sub_bg_color or '#000000' }}">
+          </div>
+          <!-- BG & highlight -->
+          <div class="ctrl-row">
+            <div class="form-check" style="margin-bottom:2px;">
+              <input type="checkbox" class="form-check-input" name="sub_bg_enabled" id="subBgEnabled"
+                     value="1" {% if job.sub_bg_enabled %}checked{% endif %}>
+              <label class="form-check-label" style="font-size:0.65rem;" for="subBgEnabled">BG</label>
             </div>
-            <div class="col-md-2">
-              <label class="form-label small">BG opacity%</label>
+            <div class="sp-swatch"><input type="color" name="sub_bg_color" id="subBgColor" value="{{ job.sub_bg_color or '#000000' }}"><label>Color</label></div>
+            <div style="width:56px;"><label>Op%</label>
               <input type="number" name="sub_bg_opacity" id="subBgOpacity" class="form-control form-control-sm"
                      value="{{ job.sub_bg_opacity or 60 }}" min="0" max="100">
             </div>
+            <div class="sp-divider"></div>
+            <div class="sp-swatch"><input type="color" name="sub_highlight_color" id="subHighlightColor" value="{{ job.sub_highlight_color or '#ffff00' }}"><label>Hl BG</label></div>
+            <div class="sp-swatch"><input type="color" name="sub_highlight_text_color" id="subHighlightTextColor" value="{{ job.sub_highlight_text_color or '#000000' }}"><label>Hl Tx</label></div>
+            <div style="width:52px;"><label>Box px</label>
+              <input type="number" name="sub_hl_box" id="subHlBox" class="form-control form-control-sm"
+                     value="{{ job.sub_hl_box or 16 }}" min="2" max="60" step="0.5">
+            </div>
+            <div style="width:56px;"><label>Op%</label>
+              <input type="number" name="sub_highlight_opacity" id="subHighlightOpacity" class="form-control form-control-sm"
+                     value="{{ job.sub_highlight_opacity or 100 }}" min="0" max="100">
+            </div>
           </div>
-          <small class="text-muted d-block mb-2">
-            <i class="bi bi-info-circle"></i> Drag the subtitle line on preview to reposition.
-          </small>
-          <div class="mb-1">
-            <label class="form-label fw-semibold">SRT Content <small class="text-muted fw-normal">(editable)</small></label>
-            <textarea id="srtTextarea" name="srt_text" class="form-control font-monospace"
-                      rows="11" style="font-size:0.76rem; background:#0d1117; color:#c9d1d9;">{{ srt_content }}</textarea>
-          </div>
+          <!-- SRT textarea -->
+          <label class="small fw-semibold text-muted text-uppercase" style="font-size:0.7rem;">SRT Content</label>
+          <textarea id="srtTextarea" name="srt_text" class="form-control mt-1" rows="8">{{ srt_content }}</textarea>
         </div>
+      </div>
 
-      </div><!-- /tab-content -->
+      <!-- ADVANCED EXPORT -->
+      <div class="ctrl-section">
+        <div class="section-header collapsed" onclick="this.classList.toggle('collapsed'); this.nextElementSibling.classList.toggle('d-none')">
+          <i class="bi bi-gear"></i> Advanced Export <i class="bi bi-chevron-down collapse-icon ms-auto"></i>
+        </div>
+        <div class="section-body d-none">
+          <div class="ctrl-row">
+            <div style="width:72px;"><label>FPS</label>
+              <input type="number" name="export_fps" id="exportFps" class="form-control form-control-sm"
+                     value="{{ job.export_fps or '' }}" placeholder="auto" min="1" max="120" step="1">
+            </div>
+            <div style="flex:1;min-width:100px;"><label>Bitrate</label>
+              <input type="text" name="export_bitrate" id="exportBitrate" class="form-control form-control-sm"
+                     value="{{ job.export_bitrate or '' }}" placeholder="auto (e.g. 8M, 5000k)">
+            </div>
+            <div style="width:68px;"><label>Res W</label>
+              <input type="number" name="export_res_w" id="exportResW" class="form-control form-control-sm"
+                     value="{{ job.export_res_w or '' }}" placeholder="auto" min="1" step="2">
+            </div>
+            <div style="width:68px;"><label>Res H</label>
+              <input type="number" name="export_res_h" id="exportResH" class="form-control form-control-sm"
+                     value="{{ job.export_res_h or '' }}" placeholder="auto" min="1" step="2">
+            </div>
+          </div>
+          <small class="text-muted" style="font-size:0.65rem;">Leave empty for defaults. Bitrate accepts values like "8M" or "5000k". Resolution will pad to fit.</small>
+        </div>
+      </div>
 
       <!-- Action buttons -->
       <div class="d-flex flex-wrap gap-2 mb-3">
-        <button type="submit" name="save" value="1" class="btn btn-secondary" id="saveBtn">
-          <i class="bi bi-save"></i> Save Settings
+        <button type="submit" name="save" value="1" class="btn btn-sm btn-secondary" id="saveBtn">
+          <i class="bi bi-save"></i> Save
         </button>
-        <button type="submit" class="btn btn-primary" id="renderBtn" name="render" value="1">
-          <i class="bi bi-film"></i> Render Video
+        <button type="submit" class="btn btn-sm btn-primary fw-semibold" id="renderBtn" name="render" value="1">
+          <i class="bi bi-film"></i> Render
         </button>
-        <a href="/download/{{ job.video }}" class="btn" style="background:var(--accent2);color:#fff;">
+        <a href="/download/{{ job.video }}" class="btn btn-sm" style="background:var(--accent2);color:#fff;">
           <i class="bi bi-download"></i> Download
         </a>
       </div>
-
-      <!-- Subtitle editor & highlight -->
-      <div class="control-panel">
-        <label class="section-title"><i class="bi bi-pencil-square"></i> Current Subtitle (editable)</label>
-        <div id="subtitleDisplay" class="bg-dark text-white p-2 rounded" contenteditable="true"
-             style="min-height:1.8em; font-size:0.95rem;" spellcheck="false"></div>
-        <div class="d-flex justify-content-between align-items-center mt-2">
-          <button type="button" id="highlightBtn" class="btn btn-sm btn-warning">
-            <i class="bi bi-highlighter"></i> Highlight Selection
-          </button>
-          <small class="text-muted">Highlights: <span id="highlightList" class="fw-bold"></span></small>
-        </div>
-      </div>
-
-      <!-- Time navigation -->
-      <div class="control-panel">
-        <div class="d-flex align-items-center gap-2">
-          <button type="button" id="prevSubBtn" class="btn btn-sm btn-outline-secondary" title="Previous subtitle">
-            <i class="bi bi-skip-backward-fill"></i>
-          </button>
-          <button type="button" id="playBtn" class="btn btn-sm btn-outline-secondary" title="Play">
-            <i class="bi bi-play-fill"></i>
-          </button>
-          <button type="button" id="pauseBtn" class="btn btn-sm btn-outline-secondary" title="Pause">
-            <i class="bi bi-pause-fill"></i>
-          </button>
-          <button type="button" id="nextSubBtn" class="btn btn-sm btn-outline-secondary" title="Next subtitle">
-            <i class="bi bi-skip-forward-fill"></i>
-          </button>
-          <input type="range" id="timeSlider" min="0" max="0" step="0.01" class="form-range flex-grow-1" style="accent-color:var(--accent);">
-        </div>
-      </div>
-    </form>
+    </div>
   </div>
-</div>
+</form>
+
+<video id="sourceVideo" controls preload="auto" crossorigin="anonymous"
+       style="position:absolute; top:0; left:0; width:1px; height:1px; opacity:0; pointer-events:none;">
+  <source src="/preview/{{ job.base_video or job.video }}" type="video/mp4">
+</video>
 
 <script>
 // ═══════════════════════════════════════════════════════════════════════════
@@ -423,13 +433,18 @@ function collectConfig() {
     title_x:            document.getElementById('titleX').value,
     title_y:            document.getElementById('titleY').value,
     title_bold:         document.getElementById('titleBold').checked ? '1' : '',
+    title_line_spacing: document.getElementById('titleLineSpacing')?.value || '0',
+    title_letter_spacing: document.getElementById('titleLetterSpacing')?.value || '0',
     sub_font:           document.getElementById('subFont').value,
     sub_bold:           document.getElementById('subBold').checked ? '1' : '',
     sub_size:           document.getElementById('subSize').value,
     sub_color:          document.getElementById('subColor').value,
+    sub_line_spacing:   document.getElementById('subLineSpacing')?.value || '0',
+    sub_letter_spacing: document.getElementById('subLetterSpacing')?.value || '0',
     gpu_mode:           document.getElementById('gpuMode').value,
     sub_highlight_color:       document.getElementById('subHighlightColor').value,
     sub_highlight_text_color:  document.getElementById('subHighlightTextColor').value,
+    sub_highlight_opacity:     document.getElementById('subHighlightOpacity').value,
     sub_stroke_color:           document.getElementById('subStrokeColor').value,
     sub_outline_w:              document.getElementById('subOutlineW').value,
     sub_hl_box:                 document.getElementById('subHlBox').value,
@@ -442,6 +457,10 @@ function collectConfig() {
     overlay_w:          document.getElementById('overlayW').value,
     overlay_h:          document.getElementById('overlayH').value,
     overlay:            document.getElementById('currentOverlayFile').value,
+    export_fps:         document.getElementById('exportFps')?.value || '',
+    export_bitrate:     document.getElementById('exportBitrate')?.value || '',
+    export_res_w:       document.getElementById('exportResW')?.value || '',
+    export_res_h:       document.getElementById('exportResH')?.value || '',
   };
 }
 
@@ -450,9 +469,12 @@ function applyConfig(cfg) {
     'titleText':'title_text','titleFont':'title_font','titleSize':'title_size',
     'titleColor':'title_color','titleStrokeColor':'title_stroke_color',
     'titleX':'title_x','titleY':'title_y','titleBold':'title_bold',
+    'titleLineSpacing':'title_line_spacing','titleLetterSpacing':'title_letter_spacing',
     'subFont':'sub_font','subSize':'sub_size','subColor':'sub_color',
+    'subLineSpacing':'sub_line_spacing','subLetterSpacing':'sub_letter_spacing',
     'subHighlightColor':'sub_highlight_color',
     'subHighlightTextColor':'sub_highlight_text_color',
+    'subHighlightOpacity':'sub_highlight_opacity',
     'subStrokeColor':'sub_stroke_color','subOutlineW':'sub_outline_w',
     'subHlBox':'sub_hl_box',
     'subBgEnabled':'sub_bg_enabled','subBgColor':'sub_bg_color',
@@ -460,6 +482,8 @@ function applyConfig(cfg) {
     'overlayX':'overlay_x','overlayY':'overlay_y',
     'overlayW':'overlay_w','overlayH':'overlay_h',
     'gpuMode':'gpu_mode',
+    'exportFps':'export_fps','exportBitrate':'export_bitrate',
+    'exportResW':'export_res_w','exportResH':'export_res_h',
   };
   for (const [domId, cfgKey] of Object.entries(fields)) {
     const el = document.getElementById(domId);
@@ -470,28 +494,24 @@ function applyConfig(cfg) {
       el.value = cfg[cfgKey];
     }
   }
-  // update range sliders
   document.getElementById('titleSizeRange').value = cfg.title_size || 48;
   document.getElementById('subSizeRange').value = cfg.sub_size || 18;
-  document.getElementById('gpuMode').value = cfg.gpu_mode || 'cpu';
+  document.getElementById('gpuMode').value = cfg.gpu_mode || 'auto';
+  document.getElementById('gpuModeUI').value = cfg.gpu_mode || 'auto';
   document.getElementById('subYNum').value = cfg.sub_y || 30;
-  // restore highlight / outline / background fields
-  document.getElementById('subHighlightTextColor').value = cfg.sub_highlight_text_color || '#000000';
+  document.getElementById('subHighlightOpacity').value = cfg.sub_highlight_opacity || 100;
   document.getElementById('subOutlineW').value = cfg.sub_outline_w || 2;
   document.getElementById('subHlBox').value = cfg.sub_hl_box || 16;
   document.getElementById('subBgEnabled').checked = cfg.sub_bg_enabled === '1';
   document.getElementById('titleBold').checked = cfg.title_bold === '1';
   document.getElementById('subBold').checked = cfg.sub_bold === '1';
-  document.getElementById('gpuMode').value = cfg.gpu_mode || 'cpu';
   document.getElementById('subBgColor').value = cfg.sub_bg_color || '#000000';
   document.getElementById('subBgOpacity').value = cfg.sub_bg_opacity || 60;
-  // update canvas positions
   titlePos.x = parseInt(cfg.title_x) || 10;
   titlePos.y = parseInt(cfg.title_y) || 80;
   overlayPos.x = parseInt(cfg.overlay_x) || 10;
   overlayPos.y = parseInt(cfg.overlay_y) || 10;
   subPos.y = parseInt(cfg.sub_y) || 30;
-  // restore overlay image if template includes one
   if (cfg.overlay) {
     document.getElementById('currentOverlayFile').value = cfg.overlay;
     const img = new Image();
@@ -513,76 +533,58 @@ function tplMsg(text, ok) {
   setTimeout(() => { msgEl.textContent = ''; }, 3000);
 }
 
-// Load template
 document.getElementById('loadTemplateBtn').addEventListener('click', async () => {
   const sel = document.getElementById('templateSelect');
   const name = sel.value;
-  if (!name) { tplMsg('Select a template first', false); return; }
+  if (!name) { tplMsg('Select a preset first', false); return; }
   const r = await fetch('/api/templates/load/' + encodeURIComponent(name));
   const data = await r.json();
-  if (data.ok) {
-    applyConfig(data.config);
-    tplMsg('Template loaded!', true);
-  } else {
-    tplMsg(data.error || 'Failed to load', false);
-  }
+  if (data.ok) { applyConfig(data.config); tplMsg('Loaded!', true); }
+  else { tplMsg(data.error || 'Failed', false); }
 });
 
-// Save template
 document.getElementById('saveTemplateBtn').addEventListener('click', async () => {
-  const name = prompt('Template name:');
+  const name = prompt('Preset name:');
   if (!name || !name.trim()) return;
   const config = collectConfig();
   const r = await fetch('/api/templates/save', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
+    method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({name: name.trim(), config}),
   });
   const data = await r.json();
   if (data.ok) {
     tplMsg('Saved!', true);
-    // refresh dropdown
     const sel = document.getElementById('templateSelect');
-    const opt = document.createElement('option');
-    opt.value = name.trim();
-    opt.textContent = name.trim();
-    // avoid duplicates
     for (let o of sel.options) if (o.value === name.trim()) { sel.value = name.trim(); return; }
+    const opt = document.createElement('option');
+    opt.value = name.trim(); opt.textContent = name.trim();
     sel.insertBefore(opt, sel.options[1] || null);
     sel.value = name.trim();
-  } else {
-    tplMsg('Save failed', false);
-  }
+  } else { tplMsg('Save failed', false); }
 });
 
-// Delete template
 document.getElementById('deleteTemplateBtn').addEventListener('click', async () => {
   const sel = document.getElementById('templateSelect');
   const name = sel.value;
-  if (!name) { tplMsg('Select a template first', false); return; }
-  if (!confirm('Delete template "' + name + '"?')) return;
+  if (!name) { tplMsg('Select a preset first', false); return; }
+  if (!confirm('Delete "' + name + '"?')) return;
   await fetch('/api/templates/delete/' + encodeURIComponent(name), {method:'DELETE'});
   sel.querySelector('option[value="' + name + '"]')?.remove();
-  sel.value = '';
-  tplMsg('Deleted.', true);
+  sel.value = ''; tplMsg('Deleted.', true);
 });
 
-console.log('editor script loaded');
-// attach submit handler so user gets immediate feedback when render is clicked
+// ═══════════════════════════════════════════════
+//  Form submit handler
+// ═══════════════════════════════════════════════
 const editForm = document.getElementById('editForm');
 if (editForm) {
   editForm.addEventListener('submit', e => {
-    console.log('form submitting');
-    // update current subtitle entry (tracked by index) and rewrite only that part of the
-    // textarea; this keeps the rest of the file exactly as the user originally generated it.
     const disp = document.getElementById('subtitleDisplay');
     const ta = document.getElementById('srtTextarea');
     if (disp && ta && currentSubIndex !== -1 && srtEntries[currentSubIndex]) {
-      // convert highlights to <font> tags
       let html = disp.innerHTML;
       html = html.replace(/<span[^>]*class="highlight"[^>]*>(.*?)<\/span>/g, '<font color="yellow">$1</font>');
       srtEntries[currentSubIndex].text = html;
-      // rebuild textarea lines around the current entry
       const lines = ta.value.split('\n');
       const entry = srtEntries[currentSubIndex];
       const newTextLines = html.split('\n');
@@ -591,57 +593,41 @@ if (editForm) {
       lines.splice(start, end - start + 1, ...newTextLines);
       ta.value = lines.join('\n');
     }
-    // only disable/render when the render button was clicked
     if (e.submitter && e.submitter.id === 'renderBtn') {
       const btn = document.getElementById('renderBtn');
       if (btn) {
         btn.disabled = true;
-        btn.innerHTML =
-          '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Rendering...';
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Rendering...';
       }
     }
   });
 }
 
-// helper to update subtitle display box
 function setSubtitleText(text) {
   const disp = document.getElementById('subtitleDisplay');
   if (!disp) return;
-  
-  // NOU: Nu suprascriem textul dacă utilizatorul dă click și editează!
-  if (document.activeElement === disp) return; 
-
-  // Folosim innerHTML și verificăm diferențele pentru a nu bloca cursorul
+  if (document.activeElement === disp) return;
   if (disp.innerHTML !== text && disp.textContent !== text) {
     disp.innerHTML = text;
   }
 }
 
-// NOU: Adăugăm un eveniment care ascultă ce tastezi și salvează live în SRT-ul principal
 const subtitleDisplay = document.getElementById('subtitleDisplay');
 if (subtitleDisplay) {
   subtitleDisplay.addEventListener('input', function() {
     if (currentSubIndex !== -1 && srtEntries[currentSubIndex]) {
       const entry = srtEntries[currentSubIndex];
       const ta = document.getElementById('srtTextarea');
-
-      // Salvăm html-ul pentru a păstra tag-urile <font> (highlight-urile manuale)
       let html = this.innerHTML;
       html = html.replace(/<span[^>]*class="highlight"[^>]*>(.*?)<\/span>/g, '<font color="yellow">$1</font>');
       entry.text = html;
-
-      // Extragem textul curat (fără HTML) pentru fereastra brută de SRT
       const rawText = this.textContent;
       const newTextLinesPlain = rawText.split('\n');
-
       const lines = ta.value.split('\n');
       const start = entry.startLine + 2;
       const end = entry.endLine;
-
       lines.splice(start, end - start + 1, ...newTextLinesPlain);
       ta.value = lines.join('\n');
-
-      // Ajustăm numărătoarea liniilor dacă ai dat 'Enter' și ai adăugat un rând nou
       const lineDiff = newTextLinesPlain.length - (end - start + 1);
       if (lineDiff !== 0) {
         entry.endLine += lineDiff;
@@ -654,12 +640,10 @@ if (subtitleDisplay) {
   });
 }
 
-// highlight selected word(s) in subtitleDisplay and track them.  Use mousedown so
-// we grab the selection before the button steals focus (which collapses the
-// selection).
+// Highlight button
 const highlightBtn = document.getElementById('highlightBtn');
 const highlightListEl = document.getElementById('highlightList');
-let highlights = []; // array of strings
+let highlights = [];
 function refreshHighlights() {
   if (!highlightListEl) return;
   highlightListEl.innerHTML = '';
@@ -669,14 +653,12 @@ function refreshHighlights() {
     btn.className = 'btn btn-sm btn-outline-secondary me-1';
     btn.textContent = h;
     btn.addEventListener('click', () => {
-      // remove highlight span from display
       const disp = document.getElementById('subtitleDisplay');
       if (disp) {
         const spans = disp.querySelectorAll('span.highlight');
         spans.forEach(s => { if (s.textContent === h) s.replaceWith(s.textContent); });
       }
-      highlights.splice(i,1);
-      refreshHighlights();
+      highlights.splice(i,1); refreshHighlights();
     });
     highlightListEl.appendChild(btn);
   });
@@ -693,16 +675,8 @@ if (highlightBtn) {
     const span = document.createElement('span');
     span.className = 'highlight';
     const text = range.toString();
-    try {
-      range.surroundContents(span);
-    } catch (err) {
-      // selection may cross nodes; fallback to execCommand
-      document.execCommand('hiliteColor', false, 'yellow');
-    }
-    if (text) {
-      highlights.push(text);
-      refreshHighlights();
-    }
+    try { range.surroundContents(span); } catch (err) { document.execCommand('hiliteColor', false, 'yellow'); }
+    if (text) { highlights.push(text); refreshHighlights(); }
   });
 }
 
@@ -717,90 +691,49 @@ function parseSRT(text) {
     const lines = block.split('\n');
     const startLine = lineCursor;
     const endLine = lineCursor + lines.length - 1;
-    lineCursor += lines.length + 1; // account for separator
+    lineCursor += lines.length + 1;
     if (lines.length < 3) continue;
     const m = lines[1].match(/(\d{2}:\d{2}:\d{2}[,.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,.]\d{3})/);
     if (!m) continue;
     entries.push({
-      raw: block,
-      startLine, endLine,
-      start: toSec(m[1]),
-      end:   toSec(m[2]),
-      text:  lines.slice(2).join('\n').replace(/<[^>]+>/g, '')
+      raw: block, startLine, endLine,
+      start: toSec(m[1]), end: toSec(m[2]),
+      text: lines.slice(2).join('\n').replace(/<[^>]+>/g, '')
     });
   }
   return entries;
 }
-function toSec(t) {
-  const [h, mn, s] = t.replace(',', '.').split(':');
-  return +h * 3600 + +mn * 60 + +s;
-}
+function toSec(t) { const [h, mn, s] = t.replace(',', '.').split(':'); return +h * 3600 + +mn * 60 + +s; }
 
 // ═══════════════════════════════════════════════
-//  Canvas live preview
+//  Canvas preview
 // ═══════════════════════════════════════════════
-// layer selector logic
 ['layerOverlay','layerTitle','layerSub'].forEach(id => {
   const el = document.getElementById(id);
-  if (el) {
-    el.addEventListener('change', () => {
-      if (el.checked) {
-        activeLayer = id.replace('layer','').toLowerCase();
-        console.log('active layer', activeLayer);
-      }
-    });
-  }
+  if (el) el.addEventListener('change', () => { if (el.checked) activeLayer = id.replace('layer','').toLowerCase(); });
 });
 
-const video  = document.getElementById('sourceVideo');
-console.log('video element', video);
-
-// allow temporary suppression of automatic playback when seeking
+const video = document.getElementById('sourceVideo');
 let blockNextPlay = false;
 
-// ═══════════════════════════════════════════════
-//  Utility: toggle play/pause button (video defined above)
 function updatePlayPauseIcon() {
   const btn = document.getElementById('playPauseBtn');
   if (!btn) return;
-  if (video.paused) {
-    btn.innerHTML = '<i class="bi bi-play-fill fs-5"></i>';
-  } else {
-    btn.innerHTML = '<i class="bi bi-pause-fill fs-5"></i>';
-  }
+  btn.innerHTML = video.paused ? '<i class="bi bi-play-fill fs-5"></i>' : '<i class="bi bi-pause-fill fs-5"></i>';
 }
-
-// attach click handler for custom control
 const playPauseBtn = document.getElementById('playPauseBtn');
 if (playPauseBtn) {
-  playPauseBtn.addEventListener('click', () => {
-    if (video.paused) video.play();
-    else video.pause();
-    updatePlayPauseIcon();
-  });
+  playPauseBtn.addEventListener('click', () => { video.paused ? video.play() : video.pause(); updatePlayPauseIcon(); });
 }
-// intercept play events to optionally block them
-video.addEventListener('play', () => {
-  if (blockNextPlay) {
-    blockNextPlay = false;
-    video.pause();
-    return;
-  }
-  updatePlayPauseIcon();
-});
+video.addEventListener('play', () => { if (blockNextPlay) { blockNextPlay = false; video.pause(); return; } updatePlayPauseIcon(); });
 video.addEventListener('pause', updatePlayPauseIcon);
 
-// ── subtitle navigation helpers ──────────────────────────────────────
 function jumpToSubtitle(offset) {
   if (!srtEntries || srtEntries.length === 0) return;
   const wasPaused = video.paused;
-  if (wasPaused) {
-    blockNextPlay = true;
-    setTimeout(() => { blockNextPlay = false; }, 500);
-  }
+  if (wasPaused) { blockNextPlay = true; setTimeout(() => { blockNextPlay = false; }, 500); }
   let idx = currentSubIndex;
   if (idx === -1) {
-    // find first entry after current time
     idx = srtEntries.findIndex(e => e.start > video.currentTime);
     if (idx === -1) idx = offset > 0 ? srtEntries.length - 1 : 0;
   } else {
@@ -809,129 +742,60 @@ function jumpToSubtitle(offset) {
     if (idx >= srtEntries.length) idx = srtEntries.length - 1;
   }
   video.currentTime = srtEntries[idx].start;
-  if (wasPaused) {
-    video.pause();
-  }
+  if (wasPaused) video.pause();
 }
-
-const prevSubBtn = document.getElementById('prevSubBtn');
-if (prevSubBtn) prevSubBtn.addEventListener('click', () => jumpToSubtitle(-1));
-const nextSubBtn = document.getElementById('nextSubBtn');
-if (nextSubBtn) nextSubBtn.addEventListener('click', () => jumpToSubtitle(1));
-
-// standalone play/pause buttons near slider
-const playBtn = document.getElementById('playBtn');
-const pauseBtn = document.getElementById('pauseBtn');
-if (playBtn) playBtn.addEventListener('click', () => { video.play(); updatePlayPauseIcon(); });
-if (pauseBtn) pauseBtn.addEventListener('click', () => { video.pause(); updatePlayPauseIcon(); });
+document.getElementById('prevSubBtn')?.addEventListener('click', () => jumpToSubtitle(-1));
+document.getElementById('nextSubBtn')?.addEventListener('click', () => jumpToSubtitle(1));
+document.getElementById('playBtn')?.addEventListener('click', () => { video.play(); updatePlayPauseIcon(); });
+document.getElementById('pauseBtn')?.addEventListener('click', () => { video.pause(); updatePlayPauseIcon(); });
 
 const canvas = document.getElementById('previewCanvas');
-const ctx    = canvas.getContext('2d');
+const ctx = canvas.getContext('2d');
 
-let overlayImg    = null;
-let overlayAspect = null;  // naturalW/naturalH, set when image loads
-let overlayPos    = { x: {{ job.overlay_x | default(10) | int }},
-                      y: {{ job.overlay_y | default(10) | int }} };
-let titlePos      = { x: {{ job.title_x   | default(10) | int }},
-                      y: {{ job.title_y   | default(80) | int }} };
-let subPos        = { y: {{ job.sub_y     | default(30) | int }} };  // px from bottom
-let srtEntries    = [];
-let currentSubIndex = -1;
-let dragging      = null;  // 'overlay' | 'title' | 'sub'
-let dragStart     = {};
-let canvasReady   = false; // true once first frame data is available
-// which layer is currently active for dragging (use selector buttons)
-let activeLayer   = 'overlay';
+let overlayImg = null, overlayAspect = null;
+let overlayPos = { x: {{ job.overlay_x | default(10) | int }}, y: {{ job.overlay_y | default(10) | int }} };
+let titlePos = { x: {{ job.title_x | default(10) | int }}, y: {{ job.title_y | default(80) | int }} };
+let subPos = { y: {{ job.sub_y | default(30) | int }} };
+let srtEntries = [], currentSubIndex = -1;
+let dragging = null, dragStart = {}, canvasReady = false;
+let activeLayer = 'overlay';
 
-// helper: read overlay W/H with natural-size fallback when fields are empty
-function parsePositiveInt(value, fallback) {
-  const n = parseInt(value);
-  return Number.isFinite(n) && n > 0 ? n : fallback;
-}
-
+function parsePositiveInt(value, fallback) { const n = parseInt(value); return Number.isFinite(n) && n > 0 ? n : fallback; }
 function getOvWH() {
   const wVal = parsePositiveInt(document.getElementById('overlayW').value, NaN);
   const hVal = parsePositiveInt(document.getElementById('overlayH').value, NaN);
-  const w = Number.isFinite(wVal) ? wVal : (overlayImg ? overlayImg.naturalWidth  : 150);
-  const h = Number.isFinite(hVal) ? hVal : (overlayImg ? overlayImg.naturalHeight : 150);
-  return { w, h };
+  return { w: Number.isFinite(wVal) ? wVal : (overlayImg ? overlayImg.naturalWidth : 150),
+           h: Number.isFinite(hVal) ? hVal : (overlayImg ? overlayImg.naturalHeight : 150) };
 }
 
-function updateOverlaySizeInputs(w, h) {
-  const wIn = document.getElementById('overlayW');
-  const hIn = document.getElementById('overlayH');
-  if (wIn) wIn.value = w;
-  if (hIn) hIn.value = h;
-}
-
-// pre-load existing overlay on page load
 {% if job.overlay %}
 (function () {
-  console.log('[overlay] pre-loading from job:', '{{ job.overlay }}');
   const img = new Image();
   img.onload = function() {
-    console.log('[overlay] loaded, natural size:', img.naturalWidth, 'x', img.naturalHeight);
-    overlayImg    = img;
-    overlayAspect = img.naturalWidth / img.naturalHeight;
-    const wIn = document.getElementById('overlayW');
-    const hIn = document.getElementById('overlayH');
+    overlayImg = img; overlayAspect = img.naturalWidth / img.naturalHeight;
+    const wIn = document.getElementById('overlayW'), hIn = document.getElementById('overlayH');
     if (!wIn.value) wIn.value = img.naturalWidth;
     if (!hIn.value) hIn.value = img.naturalHeight;
   };
-  img.onerror = function(e) {
-    console.error('[overlay] failed to load /preview/{{ job.overlay }}', e);
-  };
   img.src = '/preview/{{ job.overlay }}';
-  // handle cached image (onload may have fired synchronously before we attached the handler)
-  if (img.complete && img.naturalWidth > 0) {
-    console.log('[overlay] image was cached, firing onload manually');
-    img.onload();
-  }
+  if (img.complete && img.naturalWidth > 0) img.onload();
 }());
 {% endif %}
 
-// debug events
-['loadedmetadata','loadeddata','canplay','play','pause','error'].forEach(evt => {
-  video.addEventListener(evt, e => console.log('video event', evt, e));
-});
-// loadedmetadata → dimensions known (readyState 1) — start drawing immediately
-// so the preview never shows a blank frame while waiting for data
 video.addEventListener('loadedmetadata', () => {
-  console.log('loadedmetadata', video.videoWidth, video.videoHeight);
-  canvas.width  = video.videoWidth  || 540;
+  canvas.width = video.videoWidth || 540;
   canvas.height = video.videoHeight || 960;
   document.getElementById('previewW').value = video.videoWidth;
   document.getElementById('previewH').value = video.videoHeight;
-  canvasReady = true;  // start drawing immediately, don't wait for loadeddata
+  canvasReady = true;
   const slider = document.getElementById('timeSlider');
   if (slider) slider.max = video.duration || 0;
-  // autoplay muted first so the browser allows it, then unmute for audio
   video.muted = true;
-  video.play().then(() => {
-    // after playback starts successfully, unmute audio after a short delay
-    setTimeout(() => { video.muted = false; }, 600);
-  }).catch(err => console.log('play promise rejected', err));
+  video.play().then(() => { setTimeout(() => { video.muted = false; }, 600); }).catch(() => {});
 });
-// loadeddata → first frame decoded (readyState >= 2) — safe to drawImage
-video.addEventListener('loadeddata', () => {
-  console.log('loadeddata');
-  canvas.width  = video.videoWidth  || canvas.width;
-  canvas.height = video.videoHeight || canvas.height;
-  canvasReady   = true;
-});
-// Also mark ready when the browser can start playing
-video.addEventListener('canplay', () => {
-  console.log('canplay');
-  canvasReady = true;
-  if (video.paused) {
-    video.muted = true;
-    video.play().then(() => {
-      setTimeout(() => { video.muted = false; }, 600);
-    }).catch(err => console.log('play promise rejected', err));
-  }
-});
+video.addEventListener('loadeddata', () => { canvas.width = video.videoWidth || canvas.width; canvas.height = video.videoHeight || canvas.height; canvasReady = true; });
+video.addEventListener('canplay', () => { canvasReady = true; if (video.paused) { video.muted = true; video.play().then(() => { setTimeout(() => { video.muted = false; }, 600); }).catch(() => {}); } });
 
-// time slider update and seek
 const timeSlider = document.getElementById('timeSlider');
 if (timeSlider) {
   timeSlider.dragging = false;
@@ -939,42 +803,39 @@ if (timeSlider) {
   timeSlider.addEventListener('mouseup', () => { timeSlider.dragging = false; });
   timeSlider.addEventListener('input', () => {
     const wasPaused = video.paused;
-    if (wasPaused) {
-      blockNextPlay = true;
-      setTimeout(() => { blockNextPlay = false; }, 500);
-    }
+    if (wasPaused) { blockNextPlay = true; setTimeout(() => { blockNextPlay = false; }, 500); }
     video.currentTime = parseFloat(timeSlider.value);
-    if (wasPaused) {
-      video.pause();
-    }
+    if (wasPaused) video.pause();
   });
-  video.addEventListener('timeupdate', () => {
-    if (!timeSlider.dragging) timeSlider.value = video.currentTime;
-  });
+  video.addEventListener('timeupdate', () => { if (!timeSlider.dragging) timeSlider.value = video.currentTime; });
 }
-
 
 function getConf() {
   const { w: ovW, h: ovH } = getOvWH();
   return {
-    titleText:   document.getElementById('titleText').value,
-    titleFont:   document.getElementById('titleFont').value,
-    titleBold:   document.getElementById('titleBold')?.checked || false,
-    titleSize:   parseInt(document.getElementById('titleSize').value)   || 48,
-    titleColor:  document.getElementById('titleColor').value,
+    titleText: document.getElementById('titleText').value,
+    titleFont: document.getElementById('titleFont').value,
+    titleBold: document.getElementById('titleBold')?.checked || false,
+    titleSize: parseInt(document.getElementById('titleSize').value) || 48,
+    titleColor: document.getElementById('titleColor').value,
     titleStroke: document.getElementById('titleStrokeColor').value,
-    subFont:     document.getElementById('subFont').value,
-    subBold:     document.getElementById('subBold')?.checked || false,
-    subSize:     parseInt(document.getElementById('subSize').value)     || 18,
-    subColor:    document.getElementById('subColor').value,
+    titleLineSpacing: parseInt(document.getElementById('titleLineSpacing')?.value) || 0,
+    titleLetterSpacing: parseFloat(document.getElementById('titleLetterSpacing')?.value) || 0,
+    subFont: document.getElementById('subFont').value,
+    subBold: document.getElementById('subBold')?.checked || false,
+    subSize: parseInt(document.getElementById('subSize').value) || 18,
+    subColor: document.getElementById('subColor').value,
     subHighlightBg: document.getElementById('subHighlightColor').value,
     subHighlightText: document.getElementById('subHighlightTextColor').value,
-    subStroke:   document.getElementById('subStrokeColor').value,
+    subHighlightOpacity: parseInt(document.getElementById('subHighlightOpacity')?.value) / 100 || 1,
+    subStroke: document.getElementById('subStrokeColor').value,
     subOutlineW: parseFloat(document.getElementById('subOutlineW').value) || 2,
-    subHlBox:    parseFloat(document.getElementById('subHlBox').value) || 16,
+    subHlBox: parseFloat(document.getElementById('subHlBox').value) || 16,
     subBgEnabled: document.getElementById('subBgEnabled').checked,
-    subBgColor:   document.getElementById('subBgColor').value,
+    subBgColor: document.getElementById('subBgColor').value,
     subBgOpacity: parseInt(document.getElementById('subBgOpacity').value) || 60,
+    subLineSpacing: parseInt(document.getElementById('subLineSpacing')?.value) || 0,
+    subLetterSpacing: parseFloat(document.getElementById('subLetterSpacing')?.value) || 0,
     ovW, ovH,
   };
 }
@@ -983,108 +844,93 @@ function drawFrame() {
   if (!canvasReady) { requestAnimationFrame(drawFrame); return; }
   const c = getConf();
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (video.readyState >= 2) { ctx.drawImage(video, 0, 0, canvas.width, canvas.height); }
+  else { ctx.fillStyle = '#111'; ctx.fillRect(0, 0, canvas.width, canvas.height); }
 
-  // ── video frame ────────────────────────────────────────────────────
-  if (video.readyState >= 2) {
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  } else {
-    ctx.fillStyle = '#111';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-  }
-
-  // ── overlay image ────────────────────────────────────────────────────
+  // overlay
   if (overlayImg) {
     ctx.drawImage(overlayImg, overlayPos.x, overlayPos.y, c.ovW, c.ovH);
-    // dashed selection box (highlight when it's the active layer)
     ctx.save();
     ctx.strokeStyle = activeLayer === 'overlay' ? 'rgba(255,220,0,0.9)' : 'rgba(0,140,255,0.9)';
     ctx.lineWidth = activeLayer === 'overlay' ? 3 : 2;
     ctx.setLineDash([6, 3]);
     ctx.strokeRect(overlayPos.x, overlayPos.y, c.ovW, c.ovH);
     if (activeLayer === 'overlay') {
-      const handleSize = 14;
+      const hs = 14;
       ctx.fillStyle = 'rgba(255,220,0,0.9)';
-      ctx.fillRect(overlayPos.x + c.ovW - handleSize, overlayPos.y + c.ovH - handleSize, handleSize, handleSize);
-      ctx.strokeStyle = 'rgba(0,0,0,0.75)';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(overlayPos.x + c.ovW - handleSize, overlayPos.y + c.ovH - handleSize, handleSize, handleSize);
+      ctx.fillRect(overlayPos.x + c.ovW - hs, overlayPos.y + c.ovH - hs, hs, hs);
     }
     ctx.restore();
   }
 
-  // ── title text ───────────────────────────────────────────────────────
+  // title – titlePos.y is top of the first line (same coord system as FFmpeg drawtext)
   if (c.titleText) {
     ctx.save();
-    ctx.font      = `${c.titleBold ? 'bold' : 'normal'} ${c.titleSize}px "${c.titleFont}", sans-serif`;
+    const titleLetterSp = c.titleLetterSpacing || 0;
+    // Use the actual Bold font family when bold is enabled, matching FFmpeg behaviour.
+    // CSS font-weight:'bold' would trigger browser faux-bold instead of the real bold file.
+    const effectiveTitleFont = c.titleBold ? (c.titleFont + ' Bold') : c.titleFont;
+    ctx.font = `normal ${c.titleSize}px "${effectiveTitleFont}", sans-serif`;
+    ctx.letterSpacing = titleLetterSp + 'px';  // canvas letter-spacing (experimental but widely supported)
     ctx.lineWidth = Math.max(1, c.titleSize / 14);
-    ctx.strokeStyle = c.titleStroke;
-    ctx.strokeText(c.titleText, titlePos.x, titlePos.y);
-    ctx.fillStyle = c.titleColor;
-    ctx.fillText(c.titleText, titlePos.x, titlePos.y);
-    // draw a bounding box when active
+    ctx.strokeStyle = c.titleStroke; ctx.fillStyle = c.titleColor;
+    const lines = c.titleText.split('\n');
+    // line height matches FFmpeg drawtext: natural font height (~1.2×) + user line_spacing
+    const lh = c.titleSize * 1.2 + (c.titleLineSpacing || 0);
+    // First baseline = top + approx. ascent (0.8× font-size is a good average across fonts)
+    const ascent = c.titleSize * 0.8;
+    let cy = titlePos.y + ascent, maxW = 0;
+    const totalH = lines.length * lh;
+    lines.forEach(line => {
+      ctx.strokeText(line, titlePos.x, cy); ctx.fillText(line, titlePos.x, cy);
+      const w = ctx.measureText(line).width; if (w > maxW) maxW = w;
+      cy += lh;
+    });
+    ctx.letterSpacing = '0px';
     if (activeLayer === 'title') {
-      const w = c.titleText.length * c.titleSize * 0.55;
-      ctx.strokeStyle = 'rgba(255,220,0,0.9)';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([6,3]);
-      ctx.strokeRect(titlePos.x, titlePos.y - c.titleSize, w, c.titleSize+8);
+      ctx.strokeStyle = 'rgba(255,220,0,0.9)'; ctx.lineWidth = 2; ctx.setLineDash([6,3]);
+      ctx.strokeRect(titlePos.x - 4, titlePos.y, maxW + 8, totalH + 8);
     }
     ctx.restore();
   }
 
-  // ── subtitle guide line (always visible so user can drag it) ─────────
+  // subtitle guide
   const subBaseline = canvas.height - subPos.y;
-  // highlight when active layer is subtitle
-  if (activeLayer === 'sub') {
-    ctx.save();
-    ctx.strokeStyle = 'rgba(255,220,0,0.9)';
-    ctx.lineWidth   = 2;
-    ctx.setLineDash([5, 5]);
-    ctx.beginPath();
-    ctx.moveTo(0, subBaseline);
-    ctx.lineTo(canvas.width, subBaseline);
-    ctx.stroke();
-    ctx.restore();
-  }
   ctx.save();
-  ctx.strokeStyle = 'rgba(255,220,0,0.5)';
-  ctx.lineWidth   = 1;
+  ctx.strokeStyle = activeLayer === 'sub' ? 'rgba(255,220,0,0.9)' : 'rgba(255,220,0,0.35)';
+  ctx.lineWidth = activeLayer === 'sub' ? 2 : 1;
   ctx.setLineDash([5, 5]);
-  ctx.beginPath();
-  ctx.moveTo(0, subBaseline);
-  ctx.lineTo(canvas.width, subBaseline);
-  ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, subBaseline); ctx.lineTo(canvas.width, subBaseline); ctx.stroke();
   ctx.restore();
 
-  // ── current subtitle with word-level highlight ────────────────────────
-  const t   = video.currentTime;
+  // current subtitle
+  const t = video.currentTime;
   const idx = srtEntries.findIndex(e => t >= e.start && t <= e.end);
   let sub = null;
-  if (idx !== -1) {
-    sub = srtEntries[idx];
-    currentSubIndex = idx;
-  } else {
-    currentSubIndex = -1;
-  }
+  if (idx !== -1) { sub = srtEntries[idx]; currentSubIndex = idx; }
+  else { currentSubIndex = -1; }
   if (sub) {
     setSubtitleText(sub.text);
     const segDuration = sub.end - sub.start;
     const segProgress = segDuration > 0 ? Math.min(1, Math.max(0, (t - sub.start) / segDuration)) : 0;
-    const highlightColor = document.getElementById('subHighlightColor')?.value || '#ffff00';
 
     const lines = sub.text.split('\n');
-    const lh    = c.subSize * 1.4;
+    // line height matches FFmpeg ASS behaviour (font natural ≈ 1.2× + user spacing)
+    const lh = c.subSize * 1.2 + (c.subLineSpacing || 0);
     ctx.save();
-    ctx.font      = `${c.subBold ? 'bold' : 'normal'} ${c.subSize}px "${c.subFont}", sans-serif`;
+    const subLetterSp = c.subLetterSpacing || 0;
+    // Use the actual Bold font family when bold is enabled, matching FFmpeg behaviour
+    const effectiveSubFont = c.subBold ? (c.subFont + ' Bold') : c.subFont;
+    ctx.font = `normal ${c.subSize}px "${effectiveSubFont}", sans-serif`;
+    ctx.letterSpacing = subLetterSp + 'px';
     ctx.textAlign = 'left';
     ctx.lineWidth = c.subOutlineW;
     const cx = canvas.width / 2;
     const spaceW = ctx.measureText(' ').width;
 
-    // Measure all lines to compute background box dimensions
     const lineMetrics = [];
     let maxLineW = 0;
-    lines.forEach((line, li) => {
+    lines.forEach(line => {
       const words = line.trim().split(/\s+/);
       if (words.length === 0) return;
       const wordWidths = words.map(w => ctx.measureText(w).width);
@@ -1093,265 +939,143 @@ function drawFrame() {
       if (totalWidth > maxLineW) maxLineW = totalWidth;
     });
 
-    // ── draw background box behind all subtitle lines ──────────────
+    // full-line background
     if (c.subBgEnabled && lineMetrics.length > 0) {
-      const bgPadX = c.subSize * 0.5;
-      const bgPadY = c.subSize * 0.3;
+      const bgPadX = c.subSize * 0.5, bgPadY = c.subSize * 0.3;
       const bgX = cx - maxLineW / 2 - bgPadX;
       const topY = subBaseline - (lineMetrics.length - 1) * lh - c.subSize;
-      const bgW = maxLineW + bgPadX * 2;
-      const bgH = lineMetrics.length * lh + bgPadY * 2;
-
       ctx.save();
       ctx.globalAlpha = c.subBgOpacity / 100;
       ctx.fillStyle = c.subBgColor;
-      if (ctx.roundRect) {
-        ctx.beginPath();
-        ctx.roundRect(bgX, topY - bgPadY, bgW, bgH, Math.max(4, c.subSize * 0.2));
-        ctx.fill();
-      } else {
-        ctx.fillRect(bgX, topY - bgPadY, bgW, bgH);
-      }
+      if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(bgX, topY - bgPadY, maxLineW + bgPadX * 2, lineMetrics.length * lh + bgPadY * 2, Math.max(4, c.subSize * 0.2)); ctx.fill(); }
+      else { ctx.fillRect(bgX, topY - bgPadY, maxLineW + bgPadX * 2, lineMetrics.length * lh + bgPadY * 2); }
       ctx.restore();
     }
-    // ──────────────────────────────────────────────────────────────
 
     lineMetrics.forEach((lm, li) => {
       const y = subBaseline - (lineMetrics.length - 1 - li) * lh;
-      const words = lm.words;
-      const wordWidths = lm.wordWidths;
-      const totalWidth = lm.totalWidth;
-
-      // Calculate which word is current based on segment progress
+      const { words, wordWidths, totalWidth } = lm;
       const currentWordIdx = Math.min(words.length - 1, Math.floor(segProgress * words.length));
-
       let x = cx - totalWidth / 2;
 
       words.forEach((word, wi) => {
-        const isCurrent = (wi === currentWordIdx);
-
-        if (isCurrent) {
-          // Draw background highlight box for the active word
-          const currentWordWidth = ctx.measureText(word).width;
-          ctx.fillStyle = highlightColor;
-
-          const padX = c.subHlBox * 0.6;
-          const padY = c.subHlBox * 0.35;
-          const bx = x - padX;
-          const by = y - c.subSize + padY * 0.5;
-          const bw = currentWordWidth + padX * 2;
-          const bh = c.subSize + padY;
-
-          if (ctx.roundRect) {
-              ctx.beginPath();
-              ctx.roundRect(bx, by, bw, bh, Math.max(4, c.subSize * 0.15));
-              ctx.fill();
-          } else {
-              ctx.fillRect(bx, by, bw, bh);
-          }
-
-          ctx.fillStyle = c.subHighlightText;
-          ctx.fillText(word, x, y);
+        if (wi === currentWordIdx) {
+          const cw = ctx.measureText(word).width;
+          ctx.save();
+          ctx.globalAlpha = c.subHighlightOpacity;
+          ctx.fillStyle = c.subHighlightBg;
+          const padX = c.subHlBox * 0.6, padY = c.subHlBox * 0.35;
+          const bx = x - padX, by = y - c.subSize + padY * 0.5;
+          const bw = cw + padX * 2, bh = c.subSize + padY;
+          if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, Math.max(4, c.subSize * 0.15)); ctx.fill(); }
+          else { ctx.fillRect(bx, by, bw, bh); }
+          ctx.restore();
+          ctx.fillStyle = c.subHighlightText; ctx.fillText(word, x, y);
         } else {
-          // Normal (non-highlighted) words
-          ctx.strokeStyle = c.subStroke;
-          ctx.strokeText(word, x, y);
-          ctx.fillStyle = c.subColor;
-          ctx.fillText(word, x, y);
+          ctx.strokeStyle = c.subStroke; ctx.strokeText(word, x, y);
+          ctx.fillStyle = c.subColor; ctx.fillText(word, x, y);
         }
-
-        // Advance x for the next word
         x += wordWidths[wi] + spaceW;
       });
     });
     ctx.restore();
-  } else {
-    setSubtitleText('');
-  }
+    ctx.letterSpacing = '0px';
+  } else { setSubtitleText(''); }
 
   requestAnimationFrame(drawFrame);
 }
 
-// start render loop
-document.getElementById('srtTextarea').addEventListener('input', () => {
-  srtEntries = parseSRT(document.getElementById('srtTextarea').value);
-});
+document.getElementById('srtTextarea').addEventListener('input', () => { srtEntries = parseSRT(document.getElementById('srtTextarea').value); });
 srtEntries = parseSRT(document.getElementById('srtTextarea').value);
-requestAnimationFrame(drawFrame);
+// Explicitly load all @font-face fonts before starting the preview loop.
+// Canvas text does NOT trigger browser font loading (only DOM text does),
+// so we must call document.fonts.load() for every font family declared in CSS.
+function loadAllFonts() {
+  if (!document.fonts || !document.fonts.load) return Promise.resolve();
+  const families = new Set();
+  for (const sheet of document.styleSheets) {
+    try {
+      for (const rule of sheet.cssRules || []) {
+        if (rule instanceof CSSFontFaceRule) {
+          const fam = rule.style.getPropertyValue('font-family');
+          if (fam) families.add(fam.replace(/['"]/g, '').trim());
+        }
+      }
+    } catch (_) { /* cross-origin stylesheet – skip */ }
+  }
+  const promises = [];
+  for (const fam of families) {
+    // load with a dummy character; forces the browser to fetch the font
+    promises.push(document.fonts.load(`12px "${fam}"`).catch(() => {}));
+  }
+  return Promise.all(promises);
+}
+loadAllFonts().then(() => { requestAnimationFrame(drawFrame); });
 
 // ═══════════════════════════════════════════════
-//  Drag-and-drop on canvas
+//  Drag and drop
 // ═══════════════════════════════════════════════
-function canvasPt(e) {
-  const r = canvas.getBoundingClientRect();
-  return {
-    x: (e.clientX - r.left) * (canvas.width  / r.width),
-    y: (e.clientY - r.top)  * (canvas.height / r.height)
-  };
-}
-function hitOverlay(p) {
-  if (activeLayer !== 'overlay') return false;
-  const c = getConf();
-  return overlayImg &&
-    p.x >= overlayPos.x && p.x <= overlayPos.x + c.ovW &&
-    p.y >= overlayPos.y && p.y <= overlayPos.y + c.ovH;
-}
-function hitOverlayResize(p, c) {
-  if (activeLayer !== 'overlay') return false;
-  const handleSize = 14;
-  return overlayImg &&
-    p.x >= overlayPos.x + c.ovW - handleSize && p.x <= overlayPos.x + c.ovW &&
-    p.y >= overlayPos.y + c.ovH - handleSize && p.y <= overlayPos.y + c.ovH;
-}
-function hitTitle(p) {
-  if (activeLayer !== 'title') return false;
-  const c = getConf();
-  if (!c.titleText) return false;
-  const w = c.titleText.length * c.titleSize * 0.55;
-  return p.x >= titlePos.x && p.x <= titlePos.x + w &&
-         p.y >= titlePos.y - c.titleSize && p.y <= titlePos.y + 8;
-}
-function hitSub(p) {
-  if (activeLayer !== 'sub') return false;
-  // draggable band ±20 px around the subtitle baseline
-  return Math.abs(p.y - (canvas.height - subPos.y)) < 20;
-}
+function canvasPt(e) { const r = canvas.getBoundingClientRect(); return { x: (e.clientX - r.left) * (canvas.width / r.width), y: (e.clientY - r.top) * (canvas.height / r.height) }; }
+function hitOverlay(p) { if (activeLayer !== 'overlay') return false; const c = getConf(); return overlayImg && p.x >= overlayPos.x && p.x <= overlayPos.x + c.ovW && p.y >= overlayPos.y && p.y <= overlayPos.y + c.ovH; }
+function hitOverlayResize(p, c) { if (activeLayer !== 'overlay') return false; const hs = 14; return overlayImg && p.x >= overlayPos.x + c.ovW - hs && p.x <= overlayPos.x + c.ovW && p.y >= overlayPos.y + c.ovH - hs && p.y <= overlayPos.y + c.ovH; }
+function hitTitle(p) { if (activeLayer !== 'title') return false; const c = getConf(); if (!c.titleText) return false; const lines = c.titleText.split('\n'); const lh = c.titleSize * 1.2 + (c.titleLineSpacing || 0); const totalH = Math.max(c.titleSize, lines.length * lh); const w = c.titleText.length * c.titleSize * 0.55; return p.x >= titlePos.x && p.x <= titlePos.x + w && p.y >= titlePos.y && p.y <= titlePos.y + totalH; }
+function hitSub(p) { if (activeLayer !== 'sub') return false; return Math.abs(p.y - (canvas.height - subPos.y)) < 20; }
 
 canvas.addEventListener('mousedown', e => {
-  const p = canvasPt(e);
-  const c = getConf();
-  if (activeLayer === 'overlay' && hitOverlayResize(p, c)) {
-    dragging  = 'overlay-resize';
-    dragStart = { mx: p.x, my: p.y, ow: c.ovW, oh: c.ovH };
-  } else if (activeLayer === 'overlay' && hitOverlay(p)) {
-    dragging  = 'overlay';
-    dragStart = { mx: p.x, my: p.y, ox: overlayPos.x, oy: overlayPos.y };
-  } else if (activeLayer === 'title' && hitTitle(p)) {
-    dragging  = 'title';
-    dragStart = { mx: p.x, my: p.y, ox: titlePos.x, oy: titlePos.y };
-  } else if (activeLayer === 'sub' && hitSub(p)) {
-    dragging  = 'sub';
-    dragStart = { my: p.y, oy: subPos.y };
-  }
+  const p = canvasPt(e); const c = getConf();
+  if (activeLayer === 'overlay' && hitOverlayResize(p, c)) { dragging = 'overlay-resize'; dragStart = { mx: p.x, my: p.y, ow: c.ovW, oh: c.ovH }; }
+  else if (activeLayer === 'overlay' && hitOverlay(p)) { dragging = 'overlay'; dragStart = { mx: p.x, my: p.y, ox: overlayPos.x, oy: overlayPos.y }; }
+  else if (activeLayer === 'title' && hitTitle(p)) { dragging = 'title'; dragStart = { mx: p.x, my: p.y, ox: titlePos.x, oy: titlePos.y }; }
+  else if (activeLayer === 'sub' && hitSub(p)) { dragging = 'sub'; dragStart = { my: p.y, oy: subPos.y }; }
   if (dragging) canvas.style.cursor = dragging === 'overlay-resize' ? 'nwse-resize' : 'grabbing';
 });
 canvas.addEventListener('mousemove', e => {
   const p = canvasPt(e);
   if (!dragging) {
-    const c = getConf();
-    const overHandle = activeLayer === 'overlay' && hitOverlayResize(p, c);
-    const hit = overHandle ||
-                (activeLayer === 'overlay' && hitOverlay(p)) ||
-                (activeLayer === 'title' && hitTitle(p)) ||
-                (activeLayer === 'sub' && hitSub(p));
-    canvas.style.cursor = overHandle ? 'nwse-resize' : hit ? 'grab' : 'crosshair';
-    return;
+    const c = getConf(); const overHandle = activeLayer === 'overlay' && hitOverlayResize(p, c);
+    const hit = overHandle || (activeLayer === 'overlay' && hitOverlay(p)) || (activeLayer === 'title' && hitTitle(p)) || (activeLayer === 'sub' && hitSub(p));
+    canvas.style.cursor = overHandle ? 'nwse-resize' : hit ? 'grab' : 'crosshair'; return;
   }
-  const dx = p.x - (dragStart.mx || 0);
-  const dy = p.y - dragStart.my;
+  const dx = p.x - (dragStart.mx || 0), dy = p.y - dragStart.my;
   if (dragging === 'overlay-resize') {
     const lock = document.getElementById('lockAspect')?.checked;
-    let w = Math.max(10, Math.round(dragStart.ow + dx));
-    let h = Math.max(10, Math.round(dragStart.oh + dy));
-    if (lock && overlayAspect) {
-      if (Math.abs(dx) >= Math.abs(dy)) {
-        h = Math.max(10, Math.round(w / overlayAspect));
-      } else {
-        w = Math.max(10, Math.round(h * overlayAspect));
-      }
-    }
-    const maxW = Math.max(10, canvas.width - overlayPos.x);
-    const maxH = Math.max(10, canvas.height - overlayPos.y);
-    w = Math.min(w, maxW);
-    h = Math.min(h, maxH);
-    document.getElementById('overlayW').value = w;
-    document.getElementById('overlayH').value = h;
-    canvas.style.cursor = 'nwse-resize';
-    return;
+    let w = Math.max(10, Math.round(dragStart.ow + dx)), h = Math.max(10, Math.round(dragStart.oh + dy));
+    if (lock && overlayAspect) { if (Math.abs(dx) >= Math.abs(dy)) { h = Math.max(10, Math.round(w / overlayAspect)); } else { w = Math.max(10, Math.round(h * overlayAspect)); } }
+    w = Math.min(w, Math.max(10, canvas.width - overlayPos.x)); h = Math.min(h, Math.max(10, canvas.height - overlayPos.y));
+    document.getElementById('overlayW').value = w; document.getElementById('overlayH').value = h;
+    canvas.style.cursor = 'nwse-resize'; return;
   }
-  if (dragging === 'overlay') {
-    overlayPos.x = Math.round(dragStart.ox + dx);
-    overlayPos.y = Math.round(dragStart.oy + dy);
-    document.getElementById('overlayX').value = overlayPos.x;
-    document.getElementById('overlayY').value = overlayPos.y;
-  } else if (dragging === 'title') {
-    titlePos.x = Math.round(dragStart.ox + dx);
-    titlePos.y = Math.round(dragStart.oy + dy);
-    document.getElementById('titleX').value = titlePos.x;
-    document.getElementById('titleY').value = titlePos.y;
-  } else if (dragging === 'sub') {
-    // dragging UP (dy < 0) increases the bottom margin = moves subs higher
-    subPos.y = Math.max(0, Math.round(dragStart.oy - dy));
-    document.getElementById('subY').value     = subPos.y;
-    document.getElementById('subYNum').value   = subPos.y;
-  }
+  if (dragging === 'overlay') { overlayPos.x = Math.round(dragStart.ox + dx); overlayPos.y = Math.round(dragStart.oy + dy); document.getElementById('overlayX').value = overlayPos.x; document.getElementById('overlayY').value = overlayPos.y; }
+  else if (dragging === 'title') { titlePos.x = Math.round(dragStart.ox + dx); titlePos.y = Math.round(dragStart.oy + dy); document.getElementById('titleX').value = titlePos.x; document.getElementById('titleY').value = titlePos.y; }
+  else if (dragging === 'sub') { subPos.y = Math.max(0, Math.round(dragStart.oy - dy)); document.getElementById('subY').value = subPos.y; document.getElementById('subYNum').value = subPos.y; }
 });
-canvas.addEventListener('mouseup',    () => { dragging = null; canvas.style.cursor = 'crosshair'; });
+canvas.addEventListener('mouseup', () => { dragging = null; canvas.style.cursor = 'crosshair'; });
 canvas.addEventListener('mouseleave', () => { dragging = null; });
 
-// ═══════════════════════════════════════════════
-//  Overlay file picker → preview + auto-size + aspect
-// ═══════════════════════════════════════════════
+// overlay upload
 document.getElementById('overlayInput').addEventListener('change', e => {
-  const file = e.target.files[0];
-  if (!file) return;
-  // track the filename so templates can save & restore it
+  const file = e.target.files[0]; if (!file) return;
   document.getElementById('currentOverlayFile').value = file.name;
   const url = URL.createObjectURL(file);
   const img = new Image();
-  img.onload = () => {
-    overlayImg    = img;
-    overlayAspect = img.naturalWidth / img.naturalHeight;
-    document.getElementById('overlayW').value = img.naturalWidth;
-    document.getElementById('overlayH').value = img.naturalHeight;
-  };
+  img.onload = () => { overlayImg = img; overlayAspect = img.naturalWidth / img.naturalHeight; document.getElementById('overlayW').value = img.naturalWidth; document.getElementById('overlayH').value = img.naturalHeight; };
   img.src = url;
-  const thumb = document.getElementById('overlayThumb');
-  if (thumb) {
-    thumb.src = url;
-    thumb.style.display = 'block';
-  }
 });
 
-// ═══════════════════════════════════════════════
-//  Aspect-ratio lock for overlay size inputs
-// ═══════════════════════════════════════════════
+// aspect lock
 const lockAspect = document.getElementById('lockAspect');
-const overlayWIn = document.getElementById('overlayW');
-const overlayHIn = document.getElementById('overlayH');
-overlayWIn.addEventListener('input', () => {
-  const w = parsePositiveInt(overlayWIn.value, null);
-  if (lockAspect.checked && overlayAspect && w) {
-    overlayHIn.value = Math.round(w / overlayAspect);
-  }
-});
-overlayHIn.addEventListener('input', () => {
-  const h = parsePositiveInt(overlayHIn.value, null);
-  if (lockAspect.checked && overlayAspect && h) {
-    overlayWIn.value = Math.round(h * overlayAspect);
-  }
-});
+const overlayWIn = document.getElementById('overlayW'), overlayHIn = document.getElementById('overlayH');
+overlayWIn.addEventListener('input', () => { const w = parsePositiveInt(overlayWIn.value, null); if (lockAspect.checked && overlayAspect && w) overlayHIn.value = Math.round(w / overlayAspect); });
+overlayHIn.addEventListener('input', () => { const h = parsePositiveInt(overlayHIn.value, null); if (lockAspect.checked && overlayAspect && h) overlayWIn.value = Math.round(h * overlayAspect); });
 
-// ═══════════════════════════════════════════════
-//  Sync range ↔ number inputs
-// ═══════════════════════════════════════════════
-const titleRange  = document.getElementById('titleSizeRange');
-const titleNum    = document.getElementById('titleSize');
-titleRange.addEventListener('input',  () => { titleNum.value   = titleRange.value; });
-titleNum.addEventListener('input',    () => { titleRange.value = titleNum.value;   });
-
-const subRange = document.getElementById('subSizeRange');
-const subNum   = document.getElementById('subSize');
-subRange.addEventListener('input',  () => { subNum.value   = subRange.value; });
-subNum.addEventListener('input',    () => { subRange.value = subNum.value;   });
-
-// subtitle Y position – number-only (range slider removed)
+// range sync
+const titleRange = document.getElementById('titleSizeRange'), titleNum = document.getElementById('titleSize');
+titleRange.addEventListener('input', () => { titleNum.value = titleRange.value; });
+titleNum.addEventListener('input', () => { titleRange.value = titleNum.value; });
+const subRange = document.getElementById('subSizeRange'), subNum = document.getElementById('subSize');
+subRange.addEventListener('input', () => { subNum.value = subRange.value; });
+subNum.addEventListener('input', () => { subRange.value = subNum.value; });
 const subYNum = document.getElementById('subYNum');
-if (subYNum) {
-  subYNum.addEventListener('input', () => {
-    subPos.y = parseInt(subYNum.value) || 30;
-    document.getElementById('subY').value = subPos.y;
-  });
-}
+if (subYNum) { subYNum.addEventListener('input', () => { subPos.y = parseInt(subYNum.value) || 30; document.getElementById('subY').value = subPos.y; }); }
 </script>
 {% endblock %}
