@@ -31,11 +31,11 @@ def load_overlay(overlay_path, output_size):
     overlay = cv2.resize(overlay, output_size)
     return overlay
 
-def detect_face_center(frame, prev_gray, last_center, net, conf_threshold=0.5, motion_threshold=1.5):
+def detect_face_center(frame, prev_gray, last_center, net, conf_threshold=0.5, motion_threshold=1.6, area_multiplier=1.8):
     """
     Detectează fețele combinând mișcarea adaptivă cu urmărirea (Sticky Tracking).
-    Dacă apare mișcare evidentă în cadru, prioritizează fața care se mișcă pentru a evita
-    blocarea pe tablouri sau icoane statice de la începutul videoclipului.
+    Previne blocarea pe tablouri (cere mișcare pentru a schimba focusul) și
+    previne săriturile între fețe similare (folosind area_multiplier).
     """
     h, w = frame.shape[:2]
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -51,10 +51,8 @@ def detect_face_center(frame, prev_gray, last_center, net, conf_threshold=0.5, m
         if confidence > conf_threshold:
             box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
             (x1, y1, x2, y2) = box.astype("int")
-            x1 = max(0, x1)
-            y1 = max(0, y1)
-            x2 = min(w - 1, x2)
-            y2 = min(h - 1, y2)
+            x1, y1 = max(0, x1), max(0, y1)
+            x2, y2 = min(w - 1, x2), min(h - 1, y2)
             
             area = (x2 - x1) * (y2 - y1)
             if area < 1000:  # Ignorăm zgomotul mic
@@ -84,43 +82,45 @@ def detect_face_center(frame, prev_gray, last_center, net, conf_threshold=0.5, m
     if not valid_faces:
         return None, gray
 
-    # Separăm fețele care se mișcă activ de cele statice
+    # Separăm fețele care se mișcă activ
     moving_faces = [f for f in valid_faces if f['motion_score'] > motion_threshold]
 
-    # --- REGULA 1: DACĂ AVEM TIMP DE MIȘCARE ACTIVĂ ÎN CADRU ---
-    if moving_faces:
-        # Dacă aveam deja un istoric (last_center)
-        if last_center is not None:
-            # Căutăm dacă printre fețele în mișcare există una aproape de unde știam noi (vorbitorul care doar s-a mișcat puțin)
-            max_allowed_distance = w * 0.25
-            moving_near_last = [
-                f for f in moving_faces 
-                if np.sqrt((f['center'][0] - last_center[0])**2 + (f['center'][1] - last_center[1])**2) < max_allowed_distance
-            ]
-            if moving_near_last:
-                # Vorbitorul curent se mișcă și e pe poziție -> îl alegem pe el
-                best_face = max(moving_near_last, key=lambda f: f['area'])
-                return best_face['center'], gray
-
-        # Dacă nu e niciuna în mișcare aproape de vechiul centru, înseamnă că omul real s-a mișcat în altă parte 
-        # sau s-a activat acum. Luăm cea mai mare față în mișcare din tot cadrul (ignorând fețele statice/tablourile).
-        best_face = max(moving_faces, key=lambda f: f['area'])
-        return best_face['center'], gray
-
-    # --- REGULA 2: FALLBACK (Nimeni nu se mișcă activ în acest cadru - ex: pauză de vorbire) ---
+    # --- PASUL 1: Identificăm fața urmărită anterior (Tracked Face) ---
+    tracked_face = None
     if last_center is not None:
-        # Păstrăm fața cea mai apropiată de poziția anterioară (chiar dacă acum e statică)
         max_allowed_distance = w * 0.25
         closest_face = min(valid_faces, key=lambda f: np.sqrt((f['center'][0] - last_center[0])**2 + (f['center'][1] - last_center[1])**2))
         dist = np.sqrt((closest_face['center'][0] - last_center[0])**2 + (closest_face['center'][1] - last_center[1])**2)
         
         if dist < max_allowed_distance:
-            return closest_face['center'], gray
+            tracked_face = closest_face
 
-    # --- REGULA 3: PRIMUL CADRU SAU TOTUL E PIERDUT ---
-    # Alegem pur și simplu cea mai mare față detectată
-    best_face = max(valid_faces, key=lambda f: f['area'])
-    return best_face['center'], gray
+    # --- PASUL 2: Logica de menținere (Hysteresis) combinată cu filtrul de mișcare ---
+    if tracked_face is not None:
+        # Căutăm competitori: fețe care SE MIȘCĂ activ și nu sunt fața curentă.
+        # Astfel, un tablou imens nu va putea fura focusul niciodată, deoarece nu are mișcare.
+        competitors = [f for f in moving_faces if f is not tracked_face]
+        
+        if competitors:
+            biggest_competitor = max(competitors, key=lambda f: f['area'])
+            
+            # Schimbăm focusul DOAR dacă fața în mișcare este vizibil mult mai mare (histerezis)
+            if biggest_competitor['area'] > tracked_face['area'] * area_multiplier:
+                return biggest_competitor['center'], gray
+        
+        # Dacă nimeni altcineva nu se mișcă suficient de mult, rămânem focusați pe persoana
+        # curentă. Acest lucru funcționează chiar dacă persoana a făcut o pauză și nu se mișcă temporar.
+        return tracked_face['center'], gray
+
+    # --- PASUL 3: Fallback (Nu avem istoric sau persoana urmărită a ieșit din cadru) ---
+    if moving_faces:
+        # Prioritizăm o față care se mișcă activ pentru a stabili un nou focus (ignorând tablourile)
+        biggest_moving = max(moving_faces, key=lambda f: f['area'])
+        return biggest_moving['center'], gray
+
+    # Dacă absolut nimic nu se mișcă în cadru (ex: intro cu o poză statică), o alegem pe cea mai mare
+    biggest_face = max(valid_faces, key=lambda f: f['area'])
+    return biggest_face['center'], gray
 
 def process_video(video_path, output_path, net, overlay, smoothing=0.8):
     """

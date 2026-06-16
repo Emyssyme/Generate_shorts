@@ -18,6 +18,12 @@ from flask_login import LoginManager, UserMixin, login_user, login_required, log
 from flask_socketio import SocketIO, emit
 
 # --- basic configuration --------------------------------------------------
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
 class Config:
     SCHEDULER_API_ENABLED = True
     SCHEDULER_TIMEZONE = "Europe/Bucharest"
@@ -768,7 +774,14 @@ def run_crop(input_video, output_dir, overlay=None, job_id=None):
             elif job_id and not use_gpu:
                 update_job(job_id, log="attempting crop with CPU only")
                 
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            result = subprocess.run(
+                        cmd, 
+                        capture_output=True, 
+                        text=True, 
+                        encoding='utf-8', 
+                        env=ffmpeg_env(), 
+                        timeout=600
+                    )
             
             if result.returncode != 0:
                 error_msg = result.stderr
