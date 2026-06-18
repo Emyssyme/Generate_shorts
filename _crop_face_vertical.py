@@ -31,7 +31,7 @@ def load_overlay(overlay_path, output_size):
     overlay = cv2.resize(overlay, output_size)
     return overlay
 
-def detect_face_center(frame, prev_gray, last_center, net, conf_threshold=0.5, motion_threshold=1.6, area_multiplier=1.8):
+def detect_face_center(frame, prev_gray, last_center, net, conf_threshold=0.5, motion_threshold=1.7, area_multiplier=2.0):
     """
     Detectează fețele combinând mișcarea adaptivă cu urmărirea (Sticky Tracking).
     Previne blocarea pe tablouri (cere mișcare pentru a schimba focusul) și
