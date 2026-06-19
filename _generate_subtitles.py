@@ -1,10 +1,345 @@
 import os
 import glob
 import re
-import whisper
-from moviepy import VideoFileClip
 import sys
 import io
+import json
+import base64
+import time
+import requests
+from moviepy import VideoFileClip
+
+# ── optional Whisper import (only loaded on demand) ──────────────────────
+_whisper_module = None
+
+def _get_whisper():
+    global _whisper_module
+    if _whisper_module is None:
+        import whisper
+        _whisper_module = whisper
+    return _whisper_module
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Gemini API helpers (generativelanguage.googleapis.com)
+#  – models newer than gemini‑1.5‑flash (e.g. gemini‑2.0‑flash, gemini‑2.5‑flash)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ── Hardcoded fallback keys (used when the user does not provide their own) ──
+_HARDCODED_GEMINI_KEY_1 = ""  # ← paste your primary key here
+_HARDCODED_GEMINI_KEY_2 = ""  # ← paste your secondary (quota‑fallback) key here
+
+GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+GEMINI_DEFAULT_MODEL = "gemini-2.5-flash"  # model implicit, > gemini‑1.5‑flash
+
+
+def _get_gemini_api_keys():
+    """Return a list of available Gemini API keys.
+
+    Priority:
+      1. GEMINI_USER_KEY env var (from web UI) — highest priority
+      2. GOOGLE_API_KEY_1 / GOOGLE_API_KEY_2 env vars (user‑configured)
+      3. Hardcoded fallback keys (_HARDCODED_GEMINI_KEY_1 / _2)
+
+    Duplicates are removed.
+    """
+    keys = []
+    seen = set()
+
+    # 1. User‑provided key from the web UI (highest priority)
+    ui_key = os.getenv("GEMINI_USER_KEY", "").strip()
+    if ui_key and ui_key not in seen:
+        keys.append(ui_key)
+        seen.add(ui_key)
+
+    # 2. Environment‑variable keys
+    for env_name in ("GOOGLE_API_KEY_1", "GOOGLE_API_KEY_2"):
+        key = os.getenv(env_name, "").strip()
+        if key and key not in seen:
+            keys.append(key)
+            seen.add(key)
+
+    # 3. Hardcoded fallback keys (used when user hasn't provided any, or as extras)
+    for hard_key in (_HARDCODED_GEMINI_KEY_1, _HARDCODED_GEMINI_KEY_2):
+        key = hard_key.strip()
+        if key and key not in seen:
+            keys.append(key)
+            seen.add(key)
+
+    return keys
+
+
+def _transcribe_gemini(audio_path, language="ro-RO", model=None, max_retries=2):
+    """Transcribe audio using Gemini API (generativelanguage.googleapis.com).
+
+    Rotates through GOOGLE_API_KEY_1 / GOOGLE_API_KEY_2 / hardcoded keys
+    on quota errors.  Returns a list of segment dicts compatible with
+    Whisper's output format, or raises RuntimeError if all keys fail.
+    """
+    if model is None:
+        model = GEMINI_DEFAULT_MODEL
+
+    api_keys = _get_gemini_api_keys()
+    if not api_keys:
+        raise RuntimeError(
+            "No Gemini API keys configured. "
+            "Set GOOGLE_API_KEY_1 and/or GOOGLE_API_KEY_2 environment variables, "
+            "or edit _HARDCODED_GEMINI_KEY_1 / _HARDCODED_GEMINI_KEY_2 in _generate_subtitles.py."
+        )
+
+    # Read and encode audio
+    with open(audio_path, "rb") as f:
+        audio_bytes = f.read()
+
+    file_size_mb = len(audio_bytes) / (1024 * 1024)
+    if file_size_mb > 18:
+        print(f"Audio file is {file_size_mb:.1f} MB — splitting into chunks for Gemini API")
+        return _transcribe_gemini_chunked(audio_path, language, model, api_keys)
+
+    audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
+
+    language_name = "Romanian" if language.startswith("ro") else language
+    prompt = (
+        f"Transcrie acest audio în limba {language_name}. "
+        "Returnează DOAR un array JSON valid, fără text înainte sau după. "
+        "Fiecare element din array trebuie să aibă exact aceste chei: "
+        '"start" (număr, secunde), "end" (număr, secunde), '
+        '"text" (string, textul rostit), '
+        '"words" (array de obiecte cu "word", "start", "end" — fiecare cuvânt cu timestamp-ul lui). '
+        "Nu inventa text. Dacă nu auzi nimic, returnează []. "
+        "IMPORTANT: output-ul trebuie să fie EXACT un array JSON, nimic altceva."
+    )
+
+    payload = {
+        "contents": [{
+            "parts": [
+                {"text": prompt},
+                {"inline_data": {"mime_type": "audio/wav", "data": audio_b64}},
+            ]
+        }],
+        "generationConfig": {
+            "temperature": 0.0,
+            "maxOutputTokens": 8192,
+        },
+    }
+
+    last_error = None
+    for key_idx, api_key in enumerate(api_keys):
+        for attempt in range(max_retries):
+            try:
+                url = GEMINI_API_URL.format(model=model) + f"?key={api_key}"
+                src = "env" if key_idx < len([k for k in api_keys if k not in (_HARDCODED_GEMINI_KEY_1.strip(), _HARDCODED_GEMINI_KEY_2.strip())]) else "hardcoded"
+                print(f"Calling Gemini API ({model}, key {key_idx + 1}/{len(api_keys)} [{src}], attempt {attempt + 1})…")
+                resp = requests.post(url, json=payload, timeout=180)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    return _gemini_result_to_segments(data)
+                elif resp.status_code in (429, 403):
+                    err = resp.json()
+                    print(f"Gemini API key {key_idx + 1} returned {resp.status_code}: {err.get('error', {}).get('message', 'unknown')}")
+                    break  # break retry loop, go to next key
+                else:
+                    err = resp.json()
+                    msg = err.get("error", {}).get("message", str(err))
+                    print(f"Gemini API error ({resp.status_code}): {msg}")
+                    if resp.status_code == 400:
+                        # Bad request – likely payload issue, don't retry same key
+                        last_error = RuntimeError(f"Gemini API error: {msg}")
+                        break
+                    last_error = RuntimeError(f"Gemini API error: {msg}")
+                    break
+            except requests.exceptions.RequestException as e:
+                print(f"Gemini API network error (key {key_idx + 1}, attempt {attempt + 1}): {e}")
+                last_error = e
+                time.sleep(2)  # brief backoff before retry
+
+    if last_error:
+        raise last_error
+    raise RuntimeError("All Gemini API keys exhausted or invalid.")
+
+
+def _transcribe_gemini_chunked(audio_path, language, model, api_keys):
+    """Split long audio into ~50s chunks and transcribe each via Gemini."""
+    import tempfile
+    from moviepy import AudioFileClip
+
+    audio_clip = AudioFileClip(audio_path)
+    total_duration = audio_clip.duration
+    chunk_duration = 50.0
+    all_segments = []
+
+    chunk_start = 0.0
+    chunk_idx = 0
+    while chunk_start < total_duration:
+        chunk_end = min(chunk_start + chunk_duration, total_duration)
+        print(f"Processing Gemini chunk {chunk_idx + 1}: {chunk_start:.1f}s – {chunk_end:.1f}s")
+
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            chunk_path = tmp.name
+        try:
+            sub_clip = audio_clip.subclipped(chunk_start, chunk_end)
+            sub_clip.write_audiofile(chunk_path, logger=None, fps=16000)
+            sub_clip.close()
+
+            # Use same prompt + payload structure, just with chunk audio
+            with open(chunk_path, "rb") as f:
+                chunk_bytes = f.read()
+            audio_b64 = base64.b64encode(chunk_bytes).decode("ascii")
+
+            language_name = "Romanian" if language.startswith("ro") else language
+            prompt = (
+                f"Transcrie acest audio în limba {language_name}. "
+                "Returnează DOAR un array JSON valid, fără text înainte sau după. "
+                "Fiecare element din array trebuie să aibă exact aceste chei: "
+                '"start" (număr, secunde), "end" (număr, secunde), '
+                '"text" (string, textul rostit), '
+                '"words" (array de obiecte cu "word", "start", "end"). '
+                "Nu inventa text. Dacă nu auzi nimic, returnează []. "
+                "IMPORTANT: output-ul trebuie să fie EXACT un array JSON."
+            )
+
+            payload = {
+                "contents": [{
+                    "parts": [
+                        {"text": prompt},
+                        {"inline_data": {"mime_type": "audio/wav", "data": audio_b64}},
+                    ]
+                }],
+                "generationConfig": {"temperature": 0.0, "maxOutputTokens": 8192},
+            }
+
+            success = False
+            for key_idx, api_key in enumerate(api_keys):
+                try:
+                    url = GEMINI_API_URL.format(model=model) + f"?key={api_key}"
+                    resp = requests.post(url, json=payload, timeout=180)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        segments = _gemini_result_to_segments(data)
+                        for seg in segments:
+                            seg["start"] += chunk_start
+                            seg["end"] += chunk_start
+                            for w in seg.get("words", []):
+                                w["start"] = w.get("start", 0) + chunk_start
+                                w["end"] = w.get("end", 0) + chunk_start
+                        all_segments.extend(segments)
+                        success = True
+                        break
+                    elif resp.status_code in (429, 403):
+                        err = resp.json()
+                        print(f"Gemini API key {key_idx + 1} quota: {err.get('error', {}).get('message', '?')}")
+                        break
+                    else:
+                        err = resp.json()
+                        print(f"Gemini API error: {err.get('error', {}).get('message', '?')}")
+                        break
+                except requests.exceptions.RequestException as e:
+                    print(f"Gemini API network error: {e}")
+
+            if not success:
+                raise RuntimeError(f"Gemini chunk {chunk_idx + 1} transcription failed with all keys.")
+
+        finally:
+            try:
+                os.remove(chunk_path)
+            except Exception:
+                pass
+
+        chunk_start = chunk_end
+        chunk_idx += 1
+
+    audio_clip.close()
+    return all_segments
+
+
+def _gemini_result_to_segments(data):
+    """Convert Gemini API response to Whisper-compatible segment dicts.
+
+    Gemini returns a text response; we expect it to contain a JSON array
+    of segments (as instructed by the prompt).  Falls back gracefully if
+    the JSON is malformed.
+    """
+    raw_text = ""
+    try:
+        candidates = data.get("candidates", [])
+        if candidates:
+            parts = candidates[0].get("content", {}).get("parts", [])
+            raw_text = "".join(p.get("text", "") for p in parts)
+    except Exception:
+        pass
+
+    if not raw_text.strip():
+        print("Gemini returned empty response")
+        return []
+
+    # Gemini sometimes wraps the JSON in ```json ... ``` markers
+    raw_text = raw_text.strip()
+    if raw_text.startswith("```"):
+        # Strip code fences
+        raw_text = re.sub(r"^```(?:json)?\s*\n?", "", raw_text)
+        raw_text = re.sub(r"\n?```\s*$", "", raw_text)
+
+    try:
+        segments = json.loads(raw_text)
+        if isinstance(segments, list):
+            # Validate and normalise each segment
+            valid = []
+            for seg in segments:
+                if not isinstance(seg, dict):
+                    continue
+                start = seg.get("start", 0)
+                end = seg.get("end", 0)
+                text = seg.get("text", "").strip()
+                if not text:
+                    continue
+                if start >= end:
+                    continue
+                words = seg.get("words", [])
+                # Ensure words have the right structure
+                clean_words = []
+                for w in words:
+                    if isinstance(w, dict) and w.get("word", "").strip():
+                        clean_words.append({
+                            "word": w["word"].strip(),
+                            "start": float(w.get("start", start)),
+                            "end": float(w.get("end", end)),
+                        })
+                valid.append({
+                    "start": float(start),
+                    "end": float(end),
+                    "text": text,
+                    "words": clean_words if clean_words else [],
+                })
+            # De-overlap
+            for i in range(len(valid) - 1):
+                if valid[i]["end"] > valid[i + 1]["start"]:
+                    valid[i]["end"] = valid[i + 1]["start"]
+            return valid
+        else:
+            print(f"Gemini returned non-array JSON: {type(segments)}")
+            return []
+    except json.JSONDecodeError as e:
+        print(f"Gemini JSON parse error: {e}")
+        print(f"Raw response (first 500 chars): {raw_text[:500]}")
+        return []
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Whisper helpers (local model, used as fallback)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _transcribe_whisper(audio_path, model_name="large"):
+    """Transcribe using local Whisper model."""
+    wh = _get_whisper()
+    print(f"Loading Whisper model '{model_name}'…")
+    model = wh.load_model(model_name)
+    print("Transcribing with Whisper…")
+    result = model.transcribe(
+        audio_path,
+        language="ro",
+        task="transcribe",
+        word_timestamps=True,
+    )
+    return result.get("segments", [])
 
 # 1. Force standard I/O streams to use UTF-8 cross-platform safely
 if sys.platform.startswith('win'):
@@ -285,12 +620,16 @@ def generate_srt(segments, srt_path, max_length):
 
     print(f"Subtitle saved to: {srt_path}")
 
-def process_video(video_path, model, output_folder, max_length):
-    """
-    Processes one video:
+def process_video(video_path, model_name, output_folder, max_length, method="auto"):
+    """Processes one video:
         - Extracts its audio,
-        - Uses Whisper to transcribe Romanian speech (with word-level timestamps),
+        - Transcribes using Google Speech API or Whisper (based on ``method``),
         - Generates an SRT file and an ASS file with karaoke word highlighting.
+
+    ``method`` values:
+      - ``"google"``  – Google Speech-to-Text API (needs GOOGLE_API_KEY_1/_2 env vars)
+      - ``"whisper"`` – local Whisper model
+      - ``"auto"``    – try Google API first, fall back to Whisper (default)
     """
     base_name = os.path.basename(video_path)
     name, _ = os.path.splitext(base_name)
@@ -299,64 +638,100 @@ def process_video(video_path, model, output_folder, max_length):
     srt_path = os.path.join(output_folder, srt_filename)
     ass_path = os.path.join(output_folder, ass_filename)
     audio_path = os.path.join(output_folder, f"{name}_temp_audio.wav")
-    
+
     safe_print_video_path(video_path)
     extract_audio(video_path, audio_path)
-    
-    # Transcribe the audio using Whisper (with word-level timestamps) in Romanian.
-    result = model.transcribe(audio_path, language="ro", task="transcribe",
-                              word_timestamps=True)
-    segments = result.get("segments", [])
+
+    segments = []
+    used_method = method
+
+    # ── Try Gemini API first ──────────────────────────────────────────
+    if method in ("google", "auto"):
+        try:
+            segments = _transcribe_gemini(audio_path, language="ro-RO")
+            used_method = "gemini"
+            print(f"Gemini API returned {len(segments)} segments")
+        except Exception as e:
+            print(f"Gemini API failed: {e}")
+            if method == "google":
+                # User explicitly requested Google/Gemini-only — raise
+                os.remove(audio_path)
+                raise RuntimeError(f"Gemini API failed and method is 'google': {e}")
+            # method == "auto" → fall through to Whisper
+            print("Falling back to Whisper…")
+
+    # ── Fall back to Whisper ──────────────────────────────────────────
+    if not segments:
+        try:
+            segments = _transcribe_whisper(audio_path, model_name)
+            used_method = "whisper"
+            print(f"Whisper returned {len(segments)} segments")
+        except Exception as e:
+            os.remove(audio_path)
+            raise RuntimeError(f"Whisper transcription also failed: {e}")
+
     if not segments:
         print(f"No segments were produced for {video_path}.")
         os.remove(audio_path)
         return
-    
+
     # Generate both SRT (standard) and ASS (karaoke word-highlight)
-    # Pre-subdivide segments for consistency between both outputs
     subdivided = subdivide_segments_with_words(segments, max_length)
     generate_srt(subdivided, srt_path, max_length)
     generate_ass_karaoke(subdivided, ass_path, max_length)
     os.remove(audio_path)
+    print(f"Subtitles generated via {used_method}: {srt_path}, {ass_path}")
 
-def process_folder(input_folder, output_folder, model, max_length, video_extensions=[".mp4", ".mov", ".mkv"]):
-    """
-    Processes all video files in input_folder (with the specified extensions)
+
+def process_folder(input_folder, output_folder, model, max_length, method="auto", video_extensions=[".mp4", ".mov", ".mkv"]):
+    """Processes all video files in input_folder (with the specified extensions)
     and writes SRT + ASS files to output_folder.
     """
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
-    
+
     video_files = []
     for ext in video_extensions:
         video_files.extend(glob.glob(os.path.join(input_folder, f"*{ext}")))
-    
+
     if not video_files:
         print("No video files found in the folder.")
         return
-    
+
     for video_file in video_files:
-        process_video(video_file, model, output_folder, max_length)
+        process_video(video_file, model, output_folder, max_length, method=method)
+
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(
-        description="Generate subtitles for a video or folder of videos using Whisper."
+        description="Generate subtitles for a video or folder of videos using Google Speech API or Whisper."
     )
     parser.add_argument("--input", "-i", required=True,
                         help="input video file or folder")
     parser.add_argument("--output", "-o", required=True,
                         help="output folder for generated SRT files")
     parser.add_argument("--model", default="large",
-                        help="Whisper model name (small, base, large, etc.)")
+                        help="Whisper model name (small, base, large, etc.) — used as fallback")
     parser.add_argument("--max-length", type=int, default=22,
                         help="maximum characters per subtitle line")
+    parser.add_argument("--method", default="auto",
+                        choices=["google", "whisper", "auto"],
+                        help="subtitle method: google (API), whisper (local), auto (try google first)")
     args = parser.parse_args()
 
-    print("Loading Whisper model... (this may take a while)")
-    model = whisper.load_model(args.model)
+    print(f"Subtitle method: {args.method}")
+
+    if args.method in ("whisper", "auto"):
+        # Only load Whisper if it might be needed
+        print("Loading Whisper model… (this may take a while)")
+        wh = _get_whisper()
+        model = wh.load_model(args.model)
+        print("Whisper model loaded.")
+    else:
+        model = None
 
     if os.path.isfile(args.input):
-        process_video(args.input, model, args.output, args.max_length)
+        process_video(args.input, args.model, args.output, args.max_length, method=args.method)
     else:
-        process_folder(args.input, args.output, model, args.max_length)
+        process_folder(args.input, args.output, args.model, args.max_length, method=args.method)

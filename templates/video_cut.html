@@ -42,6 +42,23 @@
                 <input type="checkbox" name="skip_subtitles" class="form-check-input" id="skipSubtitles">
                 <label class="form-check-label small" for="skipSubtitles">Skip auto-generating subtitles (import manually later)</label>
             </div>
+            <div class="mb-3">
+                <label class="form-label small fw-semibold">Subtitle method</label>
+                <select name="subtitle_method" class="form-select form-select-sm" id="subtitleMethod">
+                    <option value="auto" selected>Auto (Gemini → Whisper fallback)</option>
+                    <option value="google">Gemini API only</option>
+                    <option value="whisper">Whisper local only</option>
+                </select>
+            </div>
+            <div class="mb-3" id="geminiKeyGroup">
+                <label class="form-label small fw-semibold">Your Gemini API key <span class="text-muted fw-normal">(optional – overrides defaults)</span></label>
+                <div class="input-group">
+                    <span class="input-group-text" style="background:var(--surface2);border-color:var(--border);"><i class="bi bi-key"></i></span>
+                    <input type="password" name="gemini_user_key" class="form-control form-control-sm" placeholder="AIzaSy... your key" id="geminiKeyInput">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="toggleKeyVisibility" title="Show/hide key"><i class="bi bi-eye"></i></button>
+                </div>
+                <small class="text-muted">Key is only used for this session – not stored on disk.</small>
+            </div>
             <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold">
               <i class="bi bi-lightning-charge-fill"></i> Start Processing
             </button>
@@ -114,5 +131,24 @@
             }
         }, 2000);
     };
+
+    // Toggle API key visibility
+    document.getElementById('toggleKeyVisibility').addEventListener('click', function() {
+        const input = document.getElementById('geminiKeyInput');
+        const icon = this.querySelector('i');
+        if (input.type === 'password') {
+            input.type = 'text';
+            icon.className = 'bi bi-eye-slash';
+        } else {
+            input.type = 'password';
+            icon.className = 'bi bi-eye';
+        }
+    });
+
+    // Show/hide Gemini key field based on subtitle method
+    document.getElementById('subtitleMethod').addEventListener('change', function() {
+        const keyGroup = document.getElementById('geminiKeyGroup');
+        keyGroup.style.display = this.value === 'whisper' ? 'none' : '';
+    });
 </script>
 {% endblock %}

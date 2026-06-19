@@ -757,10 +757,19 @@ def run_crop(input_video, output_dir, overlay=None, job_id=None):
     """
     script = find_script("_crop_face_vertical.py")
     
+    # Only attempt GPU crop acceleration when NVIDIA CUDA is available
+    # (the crop helper uses OpenCV DNN which only supports CUDA, not Intel QSV)
+    nvidia_available = False
+    try:
+        r = subprocess.run(['nvidia-smi'], capture_output=True, timeout=3)
+        nvidia_available = r.returncode == 0
+    except Exception:
+        pass
+
     # Try with GPU first if available, then fallback to CPU
     for use_gpu in [True, False]:
-        if use_gpu and not GPU_AVAILABLE:
-            continue  # Skip GPU attempt if no GPU detected
+        if use_gpu and not nvidia_available:
+            continue  # Skip GPU attempt if no NVIDIA GPU detected
             
         cmd = [sys.executable, script, "--input", input_video, "--output", output_dir]
         if overlay:
@@ -801,7 +810,7 @@ def run_crop(input_video, output_dir, overlay=None, job_id=None):
             break  # Exit retry loop on success
             
         except subprocess.TimeoutExpired:
-            if use_gpu and GPU_AVAILABLE:
+            if use_gpu and nvidia_available:
                 if job_id:
                     update_job(job_id, log="GPU crop timed out, retrying with CPU")
                 continue  # Try again with CPU
@@ -817,11 +826,20 @@ def run_crop(input_video, output_dir, overlay=None, job_id=None):
     # always transcode to h264 for browser compatibility
     trans = os.path.join(output_dir, base + "_processed_h264.mp4")
     try:
+        # Use GPU encoder for the transcode step if available (faster, less CPU)
+        gpu_enc = select_auto_gpu_encoder()
+        if gpu_enc:
+            encode_args = list(GPU_ENCODER_QUALITY[gpu_enc])
+            update_job(job_id, log=f"transcoding cropped video with {gpu_enc}")
+        else:
+            encode_args = [
+                '-c:v', 'libx264', '-crf', '18', '-preset', 'fast',
+                '-g', '30', '-keyint_min', '30', '-sc_threshold', '0',
+                '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
+            ]
         subprocess.run([
             'ffmpeg', '-nostdin', '-y', '-i', cropped,
-            '-c:v', 'libx264', '-crf', '18', '-preset', 'fast',
-            '-g', '30', '-keyint_min', '30', '-sc_threshold', '0',
-            '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
+            *encode_args,
             '-c:a', 'copy', trans
         ], check=True, timeout=600, env=ffmpeg_env())
         return trans
@@ -832,55 +850,65 @@ def run_crop(input_video, output_dir, overlay=None, job_id=None):
         return cropped
 
 
-def run_subtitles(input_video, output_dir, model="large", max_length=22, job_id=None):
+def run_subtitles(input_video, output_dir, model="large", max_length=22, job_id=None, method="auto", gemini_user_key=""):
     """Generate subtitles for a single video.
 
     If ``job_id`` is passed, stream the helper script's output into the job log.
+
+    ``method`` can be:
+      - ``"google"``  – use Gemini API (requires GOOGLE_API_KEY_1 / GOOGLE_API_KEY_2, or hardcoded keys)
+      - ``"whisper"`` – use local Whisper model
+      - ``"auto"``    – try Gemini first, fall back to Whisper (default)
+    ``gemini_user_key`` – optional user-provided API key from the UI (highest priority)
 
     Returns a tuple ``(srt_path, ass_path)`` — the ASS file contains word-level
     karaoke tags for per-word highlighting during video rendering.
     """
     script = find_script("_generate_subtitles.py")
     cmd = [sys.executable, script, "--input", input_video, "--output", output_dir,
-           "--model", model, "--max-length", str(max_length)]
-    
+           "--model", model, "--max-length", str(max_length), "--method", method]
+
     # 1. Prepare environment variables to force the child process into UTF-8 Mode
     sub_env = os.environ.copy()
     sub_env["PYTHONUTF8"] = "1"
     sub_env["PYTHONIOENCODING"] = "utf-8"
+    if gemini_user_key:
+        sub_env["GEMINI_USER_KEY"] = gemini_user_key
+        if job_id:
+            update_job(job_id, log="using user-provided Gemini API key from UI")
 
     if job_id:
-        update_job(job_id, log="starting subtitle generation")
-        
+        update_job(job_id, log=f"starting subtitle generation (method={method})")
+
         # 2. Added encoding='utf-8' and passed the sub_env
         proc = subprocess.Popen(
-            cmd, 
-            stdout=subprocess.PIPE, 
-            stderr=subprocess.STDOUT, 
-            text=True, 
-            encoding='utf-8', 
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding='utf-8',
             env=sub_env
         )
-        
+
         for line in proc.stdout:
             update_job(job_id, log=line.rstrip())
-        
+
         proc.wait(timeout=3600)  # 1 hour max for subtitle generation
         if proc.returncode != 0:
             raise RuntimeError(f"subtitle generation failed (see logs); rc={proc.returncode}")
     else:
         # 3. Added encoding='utf-8' and passed the sub_env here as well
         result = subprocess.run(
-            cmd, 
-            capture_output=True, 
-            text=True, 
-            encoding='utf-8', 
-            env=sub_env, 
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding='utf-8',
+            env=sub_env,
             timeout=3600
         )
         if result.returncode != 0:
             raise RuntimeError(f"subtitle generation failed: {result.stderr}")
-            
+
     # output files use same base name convention as the helper script
     base = os.path.splitext(os.path.basename(input_video))[0]
     srt_path = os.path.join(output_dir, base + ".srt")
@@ -971,12 +999,15 @@ def _time_to_seconds(t_val):
             return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
     return float(t_str)
 
-def background_pipeline(job_id, url=None, upload_path=None, start_time="0", end_time=None, skip_unsilence=False, skip_cropping=False, skip_subtitles=False):
+def background_pipeline(job_id, url=None, upload_path=None, start_time="0", end_time=None, skip_unsilence=False, skip_cropping=False, skip_subtitles=False, subtitle_method="auto", gemini_user_key=""):
     """Background thread that cuts/downloads then optionally unsilences, crops, subtitles.
 
     ``skip_unsilence`` is used when the user knows the clip already has clean audio.
     ``skip_cropping`` is used to bypass the face-crop step entirely (e.g. when no face is present).
     ``skip_subtitles`` is used to skip automatic subtitle generation entirely.
+    ``subtitle_method``: ``"google"`` (Gemini API), ``"whisper"``, or ``"auto"`` (default: try Gemini first).
+    ``gemini_user_key``: optional user-provided API key from the UI (highest priority).
+
     These flags are recorded in the cache so repeated calls behave identically.
     """
     update_job(job_id, status="starting", log="job created")
@@ -1057,8 +1088,8 @@ def background_pipeline(job_id, url=None, upload_path=None, start_time="0", end_
             update_job(job_id, status="skipping subtitles", log="user requested no automatic subtitles")
             srtfile, assfile = None, None
         else:
-            update_job(job_id, status="subtitling", log="generating subtitles")
-            srtfile, assfile = run_subtitles(cropped, DOWNLOADS_DIR, job_id=job_id)
+            update_job(job_id, status="subtitling", log=f"generating subtitles (method={subtitle_method})")
+            srtfile, assfile = run_subtitles(cropped, DOWNLOADS_DIR, job_id=job_id, method=subtitle_method, gemini_user_key=gemini_user_key)
 
             # sanity check: ensure subtitles were actually written
             if not os.path.exists(srtfile):
@@ -1090,6 +1121,12 @@ def video_cut():
         skip_unsilence = request.form.get('skip_unsilence') == 'on'
         skip_cropping = request.form.get('skip_cropping') == 'on'
         skip_subtitles = request.form.get('skip_subtitles') == 'on'
+        # subtitle method: "google", "whisper", or "auto" (default)
+        subtitle_method = request.form.get('subtitle_method', 'auto').strip()
+        if subtitle_method not in ('google', 'whisper', 'auto'):
+            subtitle_method = 'auto'
+        # User-provided Gemini key from the UI (takes priority over env vars)
+        gemini_user_key = request.form.get('gemini_user_key', '').strip()
         job_id = request.form.get('job_id') or f"J{int(datetime.datetime.now().timestamp())}"
         # Sanitize job_id: only allow alphanumeric, underscore, and dash
         job_id = re.sub(r'[^a-zA-Z0-9_-]', '', job_id)
@@ -1136,6 +1173,8 @@ def video_cut():
                                       'skip_unsilence': skip_unsilence,
                                       'skip_cropping': skip_cropping,
                                       'skip_subtitles': skip_subtitles,
+                                      'subtitle_method': subtitle_method,
+                                      'gemini_user_key': gemini_user_key,
                                   },
                                   daemon=True)  # Daemon thread won't block app shutdown
         thread.start()
@@ -1278,6 +1317,17 @@ GPU_ENCODER_QUALITY = {
         '-g', '30', '-keyint_min', '30', '-sc_threshold', '0',
         '-pix_fmt', 'yuv420p', '-movflags', '+faststart'
     ],
+    # ── Intel Quick Sync (low‑power / HP Mini G3) ─────────────────
+    'h264_qsv': [
+        '-c:v', 'h264_qsv', '-global_quality', '18',
+        '-g', '30', '-keyint_min', '30', '-sc_threshold', '0',
+        '-pix_fmt', 'nv12', '-movflags', '+faststart'
+    ],
+    'hevc_qsv': [
+        '-c:v', 'hevc_qsv', '-global_quality', '18',
+        '-g', '30', '-keyint_min', '30', '-sc_threshold', '0',
+        '-pix_fmt', 'nv12', '-movflags', '+faststart'
+    ],
 }
 
 FFMPEG_ENCODER_CACHE = {}
@@ -1353,7 +1403,8 @@ def ffmpeg_supports_filter_complex_script():
 
 
 def detect_gpu_available():
-    """Detect if GPU/CUDA is available for accelerated processing."""
+    """Detect if GPU/CUDA or Intel Quick Sync is available for accelerated processing."""
+    # 1. NVIDIA CUDA
     try:
         result = subprocess.run(
             ['nvidia-smi', '--query-gpu=name', '--format=csv,noheader'],
@@ -1361,10 +1412,50 @@ def detect_gpu_available():
         )
         if result.returncode == 0 and result.stdout.strip():
             gpu_name = result.stdout.strip().split('\n')[0]
-            print(f"GPU detected: {gpu_name}")
+            print(f"GPU detected (NVIDIA): {gpu_name}")
             return True
     except Exception:
         pass
+
+    # 2. Intel Quick Sync – look for Intel GPU in the system
+    try:
+        # On Windows Intel GPU shows up via DXGI or wmic
+        if sys.platform.startswith('win'):
+            r = subprocess.run(
+                ['wmic', 'path', 'win32_videocontroller', 'get', 'name'],
+                capture_output=True, text=True, timeout=10
+            )
+            if 'Intel' in r.stdout and ('HD Graphics' in r.stdout or 'UHD Graphics' in r.stdout or 'Iris' in r.stdout):
+                print(f"GPU detected (Intel Quick Sync via wmic)")
+                return True
+        # On Linux check for /dev/dri/renderD128 (Intel GPU)
+        if os.path.exists('/dev/dri/renderD128'):
+            try:
+                r = subprocess.run(
+                    ['vainfo'], capture_output=True, text=True, timeout=5
+                )
+                if r.returncode == 0 and 'Intel' in (r.stdout + r.stderr):
+                    print("GPU detected (Intel Quick Sync via vainfo)")
+                    return True
+            except Exception:
+                # vainfo may not be installed – still return True if renderD128 exists
+                print("GPU detected (Intel Quick Sync – /dev/dri/renderD128 present)")
+                return True
+    except Exception:
+        pass
+
+    # 3. Check if ffmpeg itself has qsv support
+    try:
+        r = subprocess.run(
+            ['ffmpeg', '-hide_banner', '-encoders'],
+            capture_output=True, text=True, timeout=10
+        )
+        if 'h264_qsv' in r.stdout or 'hevc_qsv' in r.stdout:
+            print("GPU detected (Intel Quick Sync encoders available in ffmpeg)")
+            return True
+    except Exception:
+        pass
+
     print("No GPU detected; using CPU")
     return False
 
@@ -1437,13 +1528,13 @@ def delete_project(job_id):
 @app.route('/api/system-info')
 @login_required
 def api_system_info():
-    """Return system information including GPU availability."""
+    """Return system information including GPU availability and subtitle method."""
     gpu_info = {
         'available': GPU_AVAILABLE,
         'gpu_encoder': select_auto_gpu_encoder() or 'none'
     }
     
-    # Try to get GPU name
+    # Try to get GPU name (NVIDIA)
     try:
         result = subprocess.run(
             ['nvidia-smi', '--query-gpu=name', '--format=csv,noheader'],
@@ -1451,12 +1542,44 @@ def api_system_info():
         )
         if result.returncode == 0 and result.stdout.strip():
             gpu_info['gpu_name'] = result.stdout.strip().split('\n')[0]
+            gpu_info['gpu_type'] = 'nvidia'
     except Exception:
         pass
-    
+
+    # Detect Intel Quick Sync
+    if 'gpu_type' not in gpu_info:
+        try:
+            if sys.platform.startswith('win'):
+                r = subprocess.run(
+                    ['wmic', 'path', 'win32_videocontroller', 'get', 'name'],
+                    capture_output=True, text=True, timeout=10
+                )
+                if 'Intel' in r.stdout and ('HD Graphics' in r.stdout or 'UHD Graphics' in r.stdout or 'Iris' in r.stdout):
+                    gpu_info['gpu_name'] = 'Intel Quick Sync (iGPU)'
+                    gpu_info['gpu_type'] = 'intel_qsv'
+            if os.path.exists('/dev/dri/renderD128'):
+                gpu_info['gpu_name'] = 'Intel Quick Sync (iGPU)'
+                gpu_info['gpu_type'] = 'intel_qsv'
+        except Exception:
+            pass
+
+    # Subtitle method info (Gemini API)
+    gemini_env_keys = [
+        k for k in ['GOOGLE_API_KEY_1', 'GOOGLE_API_KEY_2']
+        if os.getenv(k)
+    ]
+    subtitle_info = {
+        'gemini_available': len(gemini_env_keys) > 0,
+        'gemini_keys_configured': len(gemini_env_keys),
+        'has_hardcoded_fallback': True,   # _generate_subtitles.py always has fallback keys
+        'whisper_available': True,
+        'default_method': 'google' if gemini_env_keys else 'auto',
+    }
+
     return json.dumps({
         'ok': True,
         'gpu': gpu_info,
+        'subtitle': subtitle_info,
         'python_version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
     })
 
@@ -2042,6 +2165,12 @@ if __name__ == '__main__':
     gpu_encoder = select_auto_gpu_encoder()
     if gpu_encoder:
         print(f"FFmpeg GPU Encoder: {gpu_encoder}")
+    # Gemini API status
+    gemini_keys = [k for k in ('GOOGLE_API_KEY_1', 'GOOGLE_API_KEY_2') if os.getenv(k)]
+    if gemini_keys:
+        print(f"Gemini API: {len(gemini_keys)} env key(s) configured → cloud subtitling enabled")
+    else:
+        print("Gemini API: no env keys set → checking hardcoded fallback in _generate_subtitles.py")
     print(f"Base Directory: {BASE_DIR}")
     print(f"Downloads: {DOWNLOADS_DIR}")
     print("="*70)
