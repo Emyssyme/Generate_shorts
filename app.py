@@ -1461,8 +1461,52 @@ def detect_gpu_available():
 
 GPU_AVAILABLE = detect_gpu_available()
 
+# Cache hardware capabilities so encoder selection matches actual hardware
+_NVIDIA_SMI_OK = False
+_INTEL_QSV_OK = False
+
+def _probe_hardware():
+    global _NVIDIA_SMI_OK, _INTEL_QSV_OK
+    # NVIDIA
+    try:
+        r = subprocess.run(['nvidia-smi'], capture_output=True, timeout=5)
+        _NVIDIA_SMI_OK = r.returncode == 0
+    except Exception:
+        _NVIDIA_SMI_OK = False
+    # Intel QSV
+    try:
+        if sys.platform.startswith('win'):
+            r = subprocess.run(['wmic', 'path', 'win32_videocontroller', 'get', 'name'],
+                             capture_output=True, text=True, timeout=10)
+            _INTEL_QSV_OK = 'Intel' in r.stdout and ('HD Graphics' in r.stdout or 'UHD Graphics' in r.stdout or 'Iris' in r.stdout)
+        else:
+            _INTEL_QSV_OK = os.path.exists('/dev/dri/renderD128')
+        if not _INTEL_QSV_OK:
+            # also check ffmpeg qsv encoders
+            r = subprocess.run(['ffmpeg', '-hide_banner', '-encoders'], capture_output=True, text=True, timeout=10)
+            _INTEL_QSV_OK = 'h264_qsv' in r.stdout
+    except Exception:
+        _INTEL_QSV_OK = False
+
+_probe_hardware()
+
 def select_auto_gpu_encoder():
-    """Return the first supported GPU encoder, or None if none are available."""
+    """Return the best supported GPU encoder based on actual hardware, or None.
+
+    Checks real hardware presence, not just ffmpeg compilation support.
+    Order: prefer NVIDIA on systems that have it, otherwise Intel QSV.
+    """
+    # If NVIDIA GPU is actually present, try NVENC first
+    if _NVIDIA_SMI_OK:
+        for enc in ('h264_nvenc', 'hevc_nvenc'):
+            if ffmpeg_supports_encoder(enc):
+                return enc
+    # If Intel QSV is actually present, use it
+    if _INTEL_QSV_OK:
+        for enc in ('h264_qsv', 'hevc_qsv'):
+            if ffmpeg_supports_encoder(enc):
+                return enc
+    # Fallback: try any encoder ffmpeg knows about (unlikely but safe)
     for encoder in GPU_ENCODER_QUALITY:
         if ffmpeg_supports_encoder(encoder):
             return encoder
@@ -1531,7 +1575,9 @@ def api_system_info():
     """Return system information including GPU availability and subtitle method."""
     gpu_info = {
         'available': GPU_AVAILABLE,
-        'gpu_encoder': select_auto_gpu_encoder() or 'none'
+        'gpu_encoder': select_auto_gpu_encoder() or 'none',
+        'nvidia_detected': _NVIDIA_SMI_OK,
+        'intel_qsv_detected': _INTEL_QSV_OK,
     }
     
     # Try to get GPU name (NVIDIA)
@@ -2164,7 +2210,9 @@ if __name__ == '__main__':
     print(f"GPU Available: {GPU_AVAILABLE}")
     gpu_encoder = select_auto_gpu_encoder()
     if gpu_encoder:
-        print(f"FFmpeg GPU Encoder: {gpu_encoder}")
+        print(f"FFmpeg GPU Encoder: {gpu_encoder} (NVIDIA={_NVIDIA_SMI_OK}, IntelQSV={_INTEL_QSV_OK})")
+    else:
+        print("No GPU encoder available; using CPU for rendering")
     # Gemini API status
     gemini_keys = [k for k in ('GOOGLE_API_KEY_1', 'GOOGLE_API_KEY_2') if os.getenv(k)]
     if gemini_keys:
@@ -2177,5 +2225,7 @@ if __name__ == '__main__':
     # allow port overridable by PORT env variable for hosting platforms
     port = int(os.getenv('PORT', 5015))
     debug = os.getenv('FLASK_DEBUG', '1') == '1'
+    print(f"Starting Flask on http://0.0.0.0:{port} (debug={debug})")
+    sys.stdout.flush()
     # run via socketio to support websockets
     socketio.run(app, host='0.0.0.0', port=port, debug=debug, use_reloader=False)
