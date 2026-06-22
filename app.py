@@ -678,16 +678,20 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 def title_to_ass(title_text, ass_path, font_name, font_size, color, stroke_color,
                  stroke_width, bold, letter_spacing, title_x=10, title_y=80,
                  line_spacing=0, video_width=1080, video_height=1920):
-    """Generate an ASS file for a static title with per-line \\pos(x,y) tags.
+    """Generate an ASS file for a static title with adjustable line-spacing.
 
-    Each line of ``title_text`` becomes a Dialogue event covering the full
-    video duration.  Pixel-precise positioning is achieved via the \\pos
-    override tag, matching the canvas editor's coordinate system exactly.
-
-    Letter-spacing is baked into the Style ``Spacing`` field so it survives
-    into the exported video regardless of the FFmpeg/libass version.
+    All non-empty lines are merged into a **single** Dialogue event separated
+    by ``\\N`` (ASS hard newline).  Extra line-spacing is injected as an
+    invisible spacer character (``\\u200B``, zero-width space) styled with
+    ``\\fs<spacer_px>`` between each pair of lines, giving pixel-accurate
+    control over the gap.
     """
-    lines = title_text.split('\n')
+    non_empty = [l for l in title_text.split('\n') if l]
+    if not non_empty:
+        with open(ass_path, 'w', encoding='utf-8', newline='\n') as f:
+            f.write('')
+        return
+
     ass_color = html_to_ass_color(color)
     ass_stroke = html_to_ass_color(stroke_color)
 
@@ -705,18 +709,19 @@ Style: TitleStyle,{font_name},{font_size},{ass_color},&H00FFFFFF,{ass_stroke},&H
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
-    dialogue_lines = []
-    lh = int(int(font_size) * 1.2) + int(line_spacing)
+    # Build combined text: insert invisible spacer + \\N between lines
+    if line_spacing > 0:
+        spacer = f"{{\\fs{line_spacing}}}\\u200B\\N{{\\fs{font_size}}}"
+        combined = spacer.join(non_empty)
+    else:
+        combined = "\\N".join(non_empty)
 
-    for i, line in enumerate(lines):
-        if not line:
-            continue
-        y_pos = int(title_y) + i * lh
-        dialogue_lines.append(
-            f"Dialogue: 0,0:00:00.00,99:59:59.99,TitleStyle,,0,0,0,,{{\\pos({title_x},{y_pos})}}{line}"
-        )
+    dialogue = (
+        f"Dialogue: 0,0:00:00.00,99:59:59.99,TitleStyle,,0,0,0,,"
+        f"{{\\pos({title_x},{title_y})}}{combined}"
+    )
 
-    content = header + "\n".join(dialogue_lines) + "\n"
+    content = header + dialogue + "\n"
     with open(ass_path, 'w', encoding='utf-8', newline='\n') as f:
         f.write(content)
 
@@ -1879,11 +1884,15 @@ def editor(job_id):
         # preview dimensions used for scaling
         prev_w       = float(request.form.get('preview_w') or 0)
         prev_h       = float(request.form.get('preview_h') or 0)
-        # ── spacing controls ──────────────────────────────────────────────
-        title_line_sp   = parse_int_field(request.form.get('title_line_spacing', '0'), 0)
-        title_letter_sp = parse_int_field(request.form.get('title_letter_spacing', '0'), 0)
-        sub_line_sp     = parse_int_field(request.form.get('sub_line_spacing', '0'), 0)
-        sub_letter_sp   = parse_int_field(request.form.get('sub_letter_spacing', '0'), 0)
+        # ── spacing controls (allow 0 and negative, unlike parse_int_field) ──
+        try:    title_line_sp = str(int(float(request.form.get('title_line_spacing', '0'))))
+        except: title_line_sp = '0'
+        try:    title_letter_sp = str(float(request.form.get('title_letter_spacing', '0')))
+        except: title_letter_sp = '0'
+        try:    sub_line_sp = str(int(float(request.form.get('sub_line_spacing', '0'))))
+        except: sub_line_sp = '0'
+        try:    sub_letter_sp = str(float(request.form.get('sub_letter_spacing', '0')))
+        except: sub_letter_sp = '0'
         # ── advanced export controls ──────────────────────────────────────
         export_fps      = request.form.get('export_fps', '').strip()
         export_bitrate  = request.form.get('export_bitrate', '').strip()
@@ -2149,7 +2158,7 @@ def editor(job_id):
                     f"OutlineColour={html_to_ass_color(title_stroke)},"
                     f"BackColour={bg_ass},"
                     f"BorderStyle=3,Outline={title_outline_w},Shadow=1,"
-                    f"Bold={1 if title_bold else 0}"
+                    f"Alignment=7,Bold={1 if title_bold else 0}"
                 )
             else:
                 title_style = (
@@ -2157,7 +2166,7 @@ def editor(job_id):
                     f"PrimaryColour={html_to_ass_color(title_color)},"
                     f"OutlineColour={html_to_ass_color(title_stroke)},"
                     f"Outline={title_outline_w},"
-                    f"Bold={1 if title_bold else 0}"
+                    f"Alignment=7,Bold={1 if title_bold else 0}"
                 )
             if title_letter_sp:
                 title_style += f",Spacing={title_letter_sp}"
