@@ -97,6 +97,14 @@
   .sp-swatch input[type=color] { width:28px; height:28px; padding:0; border-radius:5px; }
   .sp-swatch label { font-size:0.65rem; }
   .sp-divider { width:1px; background:var(--border); align-self:stretch; margin:0 2px; }
+  .ctrl-section.subtitles-primary {
+    border-left:3px solid var(--accent);
+    background:linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
+  }
+  .ctrl-section.subtitles-primary .section-header {
+    color:var(--accent); font-size:0.85rem;
+  }
+  .ctrl-section.subtitles-primary .section-header .collapse-icon { color:var(--accent); }
 </style>
 
 <div class="d-flex flex-wrap justify-content-between align-items-center mb-2">
@@ -199,107 +207,10 @@
     <!-- RIGHT: Controls -->
     <div class="col-xl-7 col-lg-6">
 
-      <!-- OVERLAY (collapsible) -->
-      <div class="ctrl-section">
-        <div class="section-header" onclick="this.classList.toggle('collapsed'); this.nextElementSibling.classList.toggle('d-none')">
-          <i class="bi bi-image"></i> Overlay / Logo <i class="bi bi-chevron-down collapse-icon ms-auto"></i>
-        </div>
-        <div class="section-body">
-          <div class="ctrl-row">
-            <div style="flex:1;min-width:120px;">
-              <label>Image (PNG)</label>
-              <input type="file" name="overlay" class="form-control form-control-sm" accept="image/*" id="overlayInput">
-            </div>
-            <div style="width:62px;"><label>W</label>
-              <input type="number" name="overlay_w" id="overlayW" class="form-control form-control-sm"
-                     value="{{ job.overlay_w or '' }}" placeholder="auto" min="10"></div>
-            <div style="width:62px;"><label>H</label>
-              <input type="number" name="overlay_h" id="overlayH" class="form-control form-control-sm"
-                     value="{{ job.overlay_h or '' }}" placeholder="auto" min="10"></div>
-            <div class="form-check" style="margin-bottom:2px;">
-              <input type="checkbox" class="form-check-input" id="lockAspect" checked>
-              <label class="form-check-label" style="font-size:0.65rem;" for="lockAspect">Lock</label>
-            </div>
-          </div>
-          {% if job.overlay %}
-          <span class="pill mt-1"><i class="bi bi-image"></i> {{ job.overlay }}</span>
-          {% endif %}
-          <small class="text-muted d-block" style="font-size:0.65rem;">Drag logo on canvas. Yellow corner = resize.</small>
-        </div>
-      </div>
-
-      <!-- TITLE -->
-      <div class="ctrl-section">
-        <div class="section-header" onclick="this.classList.toggle('collapsed'); this.nextElementSibling.classList.toggle('d-none')">
-          <i class="bi bi-fonts"></i> Title <i class="bi bi-chevron-down collapse-icon ms-auto"></i>
-        </div>
-        <div class="section-body">
-          <textarea name="title_text" id="titleText" class="form-control form-control-sm mb-1" rows="2"
-                    placeholder="Enter title text..." style="resize:vertical;">{{ job.title_text or '' }}</textarea>
-          <div class="ctrl-row">
-            <div style="flex:1;min-width:90px;"><label>Font</label>
-              <select name="title_font" id="titleFont" class="form-select form-select-sm">
-                {% for font in font_list %}
-                <option value="{{ font }}" {% if job.title_font == font %}selected{% endif %}>{{ font }}</option>
-                {% endfor %}
-              </select>
-            </div>
-            <div class="form-check" style="margin-bottom:2px;">
-              <input class="form-check-input" type="checkbox" value="1" id="titleBold" name="title_bold" {% if job.title_bold %}checked{% endif %}>
-              <label class="form-check-label" style="font-size:0.65rem;" for="titleBold">Bold</label>
-            </div>
-            <div style="flex:1;min-width:80px;"><label>Size</label>
-              <div class="size-row">
-                <input type="range" id="titleSizeRange" min="8" max="200" value="{{ job.title_size or 48 }}">
-                <input type="number" name="title_size" id="titleSize" class="form-control form-control-sm sp-num"
-                       value="{{ job.title_size or 48 }}" min="8" max="200">
-              </div>
-            </div>
-            <div class="sp-swatch"><input type="color" name="title_color" id="titleColor" value="{{ job.title_color or '#ffffff' }}"><label>Fill</label></div>
-            <div class="sp-swatch"><input type="color" name="title_stroke_color" id="titleStrokeColor" value="{{ job.title_stroke_color or '#000000' }}"><label>Outline</label></div>
-          </div>
-          <div class="ctrl-row">
-            <div style="width:58px;"><label>Line&nbsp;sp</label>
-              <input type="number" name="title_line_spacing" id="titleLineSpacing" class="form-control form-control-sm"
-                     value="{{ job.title_line_spacing or 0 }}" min="-20" max="100" step="1">
-            </div>
-            <div style="width:58px;"><label>Letter&nbsp;sp</label>
-              <input type="number" name="title_letter_spacing" id="titleLetterSpacing" class="form-control form-control-sm"
-                     value="{{ job.title_letter_spacing or 0 }}" min="-5" max="50" step="0.5">
-            </div>
-            <div style="flex:1;min-width:80px;"><label>GPU</label>
-              <select name="gpu_mode_ui" id="gpuModeUI" class="form-select form-select-sm" onchange="document.getElementById('gpuMode').value=this.value">
-                <option value="auto" {% if job.gpu_mode=='auto' %}selected{% endif %}>Auto</option>
-                <option value="cpu" {% if job.gpu_mode!='h264_nvenc' and job.gpu_mode!='hevc_nvenc' and job.gpu_mode!='auto' %}selected{% endif %}>CPU</option>
-                <option value="h264_nvenc" {% if job.gpu_mode=='h264_nvenc' %}selected{% endif %}>NVENC</option>
-                <option value="hevc_nvenc" {% if job.gpu_mode=='hevc_nvenc' %}selected{% endif %}>HEVC</option>
-              </select>
-            </div>
-          </div>
-          <div class="ctrl-row">
-            <div style="width:52px;"><label>Out px</label>
-              <input type="number" name="title_outline_w" id="titleOutlineW" class="form-control form-control-sm"
-                     value="{{ job.title_outline_w or 2 }}" min="0" max="20" step="0.5">
-            </div>
-            <div class="form-check" style="margin-bottom:2px;">
-              <input type="checkbox" class="form-check-input" name="title_bg_enabled" id="titleBgEnabled"
-                     value="1" {% if job.title_bg_enabled %}checked{% endif %}>
-              <label class="form-check-label" style="font-size:0.65rem;" for="titleBgEnabled">BG</label>
-            </div>
-            <div class="sp-swatch"><input type="color" name="title_bg_color" id="titleBgColor" value="{{ job.title_bg_color or '#000000' }}"><label>Color</label></div>
-            <div style="width:56px;"><label>Op%</label>
-              <input type="number" name="title_bg_opacity" id="titleBgOpacity" class="form-control form-control-sm"
-                     value="{{ job.title_bg_opacity or 60 }}" min="0" max="100">
-            </div>
-          </div>
-          <small class="text-muted" style="font-size:0.65rem;">Drag title on canvas to reposition.</small>
-        </div>
-      </div>
-
       <!-- SUBTITLES -->
-      <div class="ctrl-section">
+      <div class="ctrl-section subtitles-primary">
         <div class="section-header" onclick="this.classList.toggle('collapsed'); this.nextElementSibling.classList.toggle('d-none')">
-          <i class="bi bi-card-text"></i> Subtitles <i class="bi bi-chevron-down collapse-icon ms-auto"></i>
+          <i class="bi bi-card-text"></i> Subtitles <span class="badge bg-accent ms-2" style="font-size:0.6rem;background:var(--accent);">✏️ edit</span> <i class="bi bi-chevron-down collapse-icon ms-auto"></i>
         </div>
         <div class="section-body">
           <!-- Import row -->
@@ -382,7 +293,104 @@
           </div>
           <!-- SRT textarea -->
           <label class="small fw-semibold text-muted text-uppercase" style="font-size:0.7rem;">SRT Content</label>
-          <textarea id="srtTextarea" name="srt_text" class="form-control mt-1" rows="8">{{ srt_content }}</textarea>
+          <textarea id="srtTextarea" name="srt_text" class="form-control mt-1" rows="14" style="font-size:0.78rem;">{{ srt_content }}</textarea>
+        </div>
+      </div>
+
+      <!-- TITLE (collapsible) -->
+      <div class="ctrl-section">
+        <div class="section-header collapsed" onclick="this.classList.toggle('collapsed'); this.nextElementSibling.classList.toggle('d-none')">
+          <i class="bi bi-fonts"></i> Title <i class="bi bi-chevron-down collapse-icon ms-auto"></i>
+        </div>
+        <div class="section-body d-none">
+          <textarea name="title_text" id="titleText" class="form-control form-control-sm mb-1" rows="2"
+                    placeholder="Enter title text..." style="resize:vertical;">{{ job.title_text or '' }}</textarea>
+          <div class="ctrl-row">
+            <div style="flex:1;min-width:90px;"><label>Font</label>
+              <select name="title_font" id="titleFont" class="form-select form-select-sm">
+                {% for font in font_list %}
+                <option value="{{ font }}" {% if job.title_font == font %}selected{% endif %}>{{ font }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="form-check" style="margin-bottom:2px;">
+              <input class="form-check-input" type="checkbox" value="1" id="titleBold" name="title_bold" {% if job.title_bold %}checked{% endif %}>
+              <label class="form-check-label" style="font-size:0.65rem;" for="titleBold">Bold</label>
+            </div>
+            <div style="flex:1;min-width:80px;"><label>Size</label>
+              <div class="size-row">
+                <input type="range" id="titleSizeRange" min="8" max="200" value="{{ job.title_size or 48 }}">
+                <input type="number" name="title_size" id="titleSize" class="form-control form-control-sm sp-num"
+                       value="{{ job.title_size or 48 }}" min="8" max="200">
+              </div>
+            </div>
+            <div class="sp-swatch"><input type="color" name="title_color" id="titleColor" value="{{ job.title_color or '#ffffff' }}"><label>Fill</label></div>
+            <div class="sp-swatch"><input type="color" name="title_stroke_color" id="titleStrokeColor" value="{{ job.title_stroke_color or '#000000' }}"><label>Outline</label></div>
+          </div>
+          <div class="ctrl-row">
+            <div style="width:58px;"><label>Line&nbsp;sp</label>
+              <input type="number" name="title_line_spacing" id="titleLineSpacing" class="form-control form-control-sm"
+                     value="{{ job.title_line_spacing or 0 }}" min="-20" max="100" step="1">
+            </div>
+            <div style="width:58px;"><label>Letter&nbsp;sp</label>
+              <input type="number" name="title_letter_spacing" id="titleLetterSpacing" class="form-control form-control-sm"
+                     value="{{ job.title_letter_spacing or 0 }}" min="-5" max="50" step="0.5">
+            </div>
+            <div style="flex:1;min-width:80px;"><label>GPU</label>
+              <select name="gpu_mode_ui" id="gpuModeUI" class="form-select form-select-sm" onchange="document.getElementById('gpuMode').value=this.value">
+                <option value="auto" {% if job.gpu_mode=='auto' %}selected{% endif %}>Auto</option>
+                <option value="cpu" {% if job.gpu_mode!='h264_nvenc' and job.gpu_mode!='hevc_nvenc' and job.gpu_mode!='auto' %}selected{% endif %}>CPU</option>
+                <option value="h264_nvenc" {% if job.gpu_mode=='h264_nvenc' %}selected{% endif %}>NVENC</option>
+                <option value="hevc_nvenc" {% if job.gpu_mode=='hevc_nvenc' %}selected{% endif %}>HEVC</option>
+              </select>
+            </div>
+          </div>
+          <div class="ctrl-row">
+            <div style="width:52px;"><label>Out px</label>
+              <input type="number" name="title_outline_w" id="titleOutlineW" class="form-control form-control-sm"
+                     value="{{ job.title_outline_w or 2 }}" min="0" max="20" step="0.5">
+            </div>
+            <div class="form-check" style="margin-bottom:2px;">
+              <input type="checkbox" class="form-check-input" name="title_bg_enabled" id="titleBgEnabled"
+                     value="1" {% if job.title_bg_enabled %}checked{% endif %}>
+              <label class="form-check-label" style="font-size:0.65rem;" for="titleBgEnabled">BG</label>
+            </div>
+            <div class="sp-swatch"><input type="color" name="title_bg_color" id="titleBgColor" value="{{ job.title_bg_color or '#000000' }}"><label>Color</label></div>
+            <div style="width:56px;"><label>Op%</label>
+              <input type="number" name="title_bg_opacity" id="titleBgOpacity" class="form-control form-control-sm"
+                     value="{{ job.title_bg_opacity or 60 }}" min="0" max="100">
+            </div>
+          </div>
+          <small class="text-muted" style="font-size:0.65rem;">Drag title on canvas to reposition.</small>
+        </div>
+      </div>
+
+      <!-- OVERLAY (collapsible) -->
+      <div class="ctrl-section">
+        <div class="section-header collapsed" onclick="this.classList.toggle('collapsed'); this.nextElementSibling.classList.toggle('d-none')">
+          <i class="bi bi-image"></i> Overlay / Logo <i class="bi bi-chevron-down collapse-icon ms-auto"></i>
+        </div>
+        <div class="section-body d-none">
+          <div class="ctrl-row">
+            <div style="flex:1;min-width:120px;">
+              <label>Image (PNG)</label>
+              <input type="file" name="overlay" class="form-control form-control-sm" accept="image/*" id="overlayInput">
+            </div>
+            <div style="width:62px;"><label>W</label>
+              <input type="number" name="overlay_w" id="overlayW" class="form-control form-control-sm"
+                     value="{{ job.overlay_w or '' }}" placeholder="auto" min="10"></div>
+            <div style="width:62px;"><label>H</label>
+              <input type="number" name="overlay_h" id="overlayH" class="form-control form-control-sm"
+                     value="{{ job.overlay_h or '' }}" placeholder="auto" min="10"></div>
+            <div class="form-check" style="margin-bottom:2px;">
+              <input type="checkbox" class="form-check-input" id="lockAspect" checked>
+              <label class="form-check-label" style="font-size:0.65rem;" for="lockAspect">Lock</label>
+            </div>
+          </div>
+          {% if job.overlay %}
+          <span class="pill mt-1"><i class="bi bi-image"></i> {{ job.overlay }}</span>
+          {% endif %}
+          <small class="text-muted d-block" style="font-size:0.65rem;">Drag logo on canvas. Yellow corner = resize.</small>
         </div>
       </div>
 
