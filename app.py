@@ -1767,6 +1767,10 @@ def editor(job_id):
     job.setdefault('title_bold', False)
     job.setdefault('sub_bold', False)
     job.setdefault('sub_highlight_opacity', '100')
+    job.setdefault('title_outline_w', '2')
+    job.setdefault('title_bg_enabled', False)
+    job.setdefault('title_bg_color', '#000000')
+    job.setdefault('title_bg_opacity', '60')
 
     srt_path = os.path.join(DOWNLOADS_DIR, job.get('srt') or '')
     srt_text = ''
@@ -1849,6 +1853,10 @@ def editor(job_id):
         title_size   = parse_int_field(request.form.get('title_size', '48'), 48)
         title_x      = parse_int_field(request.form.get('title_x', '10'), 10)
         title_y      = parse_int_field(request.form.get('title_y', '80'), 80)
+        title_outline_w = parse_int_field(request.form.get('title_outline_w', '2'), 2)
+        title_bg_enabled = request.form.get('title_bg_enabled') == '1'
+        title_bg_color = request.form.get('title_bg_color', '#000000')
+        title_bg_opacity = parse_int_field(request.form.get('title_bg_opacity', '60'), 60)
         sub_font     = request.form.get('sub_font', 'Inter')
         sub_bold     = request.form.get('sub_bold') == '1'
         gpu_mode     = request.form.get('gpu_mode', 'auto')
@@ -1887,6 +1895,10 @@ def editor(job_id):
             'title_bold': title_bold,   'title_color': title_color,
             'title_stroke_color': title_stroke,
             'title_size': title_size,   'title_x': title_x, 'title_y': title_y,
+            'title_outline_w': title_outline_w,
+            'title_bg_enabled': title_bg_enabled,
+            'title_bg_color': title_bg_color,
+            'title_bg_opacity': title_bg_opacity,
             'sub_font': sub_font,       'sub_bold': sub_bold,
             'gpu_mode': gpu_mode,
             'sub_color': sub_color,
@@ -2106,6 +2118,10 @@ def editor(job_id):
             title_ass_path = os.path.join(DOWNLOADS_DIR, title_ass_name)
             title_letter_sp = int(job.get('title_letter_spacing', 0) or 0)
             title_line_sp   = int(job.get('title_line_spacing', 0) or 0)
+            title_outline_w = int(job.get('title_outline_w', '2') or 2)
+            title_bg_enabled = job.get('title_bg_enabled', False)
+            title_bg_color = job.get('title_bg_color', '#000000')
+            title_bg_opacity = int(job.get('title_bg_opacity', '60') or 60)
             title_to_ass(
                 title_text=title_text,
                 ass_path=title_ass_path,
@@ -2113,7 +2129,7 @@ def editor(job_id):
                 font_size=int(title_size),
                 color=title_color,
                 stroke_color=title_stroke,
-                stroke_width=max(1, int(title_size) // 14),
+                stroke_width=title_outline_w,
                 bold=title_bold,
                 letter_spacing=title_letter_sp,
                 title_x=int(title_x),
@@ -2124,13 +2140,25 @@ def editor(job_id):
             )
             title_ass_abs = title_ass_path.replace('\\', '/').replace(':', '\\:')
             # force_style keeps the ASS file itself minimal; all styling travels here
-            title_style = (
-                f"FontName={title_font},FontSize={title_size},"
-                f"PrimaryColour={html_to_ass_color(title_color)},"
-                f"OutlineColour={html_to_ass_color(title_stroke)},"
-                f"Outline={max(1, int(title_size) // 14)},"
-                f"Bold={1 if title_bold else 0}"
-            )
+            if title_bg_enabled:
+                ass_alpha = format(int(255 * (1 - title_bg_opacity / 100)), '02X')
+                bg_ass = f"&H{ass_alpha}" + html_to_ass_color(title_bg_color)[3:]
+                title_style = (
+                    f"FontName={title_font},FontSize={title_size},"
+                    f"PrimaryColour={html_to_ass_color(title_color)},"
+                    f"OutlineColour={html_to_ass_color(title_stroke)},"
+                    f"BackColour={bg_ass},"
+                    f"BorderStyle=3,Outline={title_outline_w},Shadow=1,"
+                    f"Bold={1 if title_bold else 0}"
+                )
+            else:
+                title_style = (
+                    f"FontName={title_font},FontSize={title_size},"
+                    f"PrimaryColour={html_to_ass_color(title_color)},"
+                    f"OutlineColour={html_to_ass_color(title_stroke)},"
+                    f"Outline={title_outline_w},"
+                    f"Bold={1 if title_bold else 0}"
+                )
             if title_letter_sp:
                 title_style += f",Spacing={title_letter_sp}"
             vf_parts.append(f"subtitles='{title_ass_abs}':fontsdir='{fonts_dir_esc}':force_style='{title_style}'")
