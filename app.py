@@ -2032,27 +2032,50 @@ def editor(job_id):
             for i, line in enumerate(title_lines):
                 if not line:    # blank lines: just advance Y, no filter needed
                     continue
-                # Write each line to its own tiny temp file (handles Unicode safely)
-                line_txt_name = f"job_{job_id}_title_line{i}.txt"
-                line_txt_path = os.path.join(DOWNLOADS_DIR, line_txt_name)
-                with open(line_txt_path, 'w', encoding='utf-8') as _lf:
-                    _lf.write(line)
-                line_txt_esc = line_txt_path.replace('\\', '/').replace(':', '\\:')
-
-                # FFmpeg drawtext y = top of the glyph ascender = top of the bounding
-                # box, which is exactly title_y as stored from the canvas drag.
-                # No ascent offset is needed: the canvas stores titlePos.y as the top
-                # of the box; FFmpeg y is also the top of the box.
                 line_y = max(0, int(title_y) + i * lh)
-                drawtext_opts = (
-                    f"drawtext=fontfile='{font_esc}':textfile='{line_txt_esc}'"
-                    f":fontsize={title_size}:fontcolor={tc}"
-                    f":x={title_x}:y={line_y}"
-                    f":box=0:bordercolor={sc}:borderw={bw}"
-                )
-                if title_letter_sp and drawtext_supports_letter_spacing():
-                    drawtext_opts += f":letter_spacing={title_letter_sp}"
-                vf_parts.append(drawtext_opts)
+
+                # ═══ letter‑spacing fallback ══════════════════════════════
+                # When FFmpeg drawtext lacks native letter_spacing support,
+                # render each character individually with precise x‑offsets
+                # so the exported video matches the canvas preview exactly.
+                if title_letter_sp and not drawtext_supports_letter_spacing():
+                    # avg char advance ≈ fontSize * 0.6 for Latin scripts
+                    char_advance = int(int(title_size) * 0.6) + int(title_letter_sp)
+                    for ci, ch in enumerate(line):
+                        ch_txt_name = f"job_{job_id}_title_line{i}_ch{ci}.txt"
+                        ch_txt_path = os.path.join(DOWNLOADS_DIR, ch_txt_name)
+                        with open(ch_txt_path, 'w', encoding='utf-8') as _lf:
+                            _lf.write(ch)
+                        ch_txt_esc = ch_txt_path.replace('\\', '/').replace(':', '\\:')
+                        ch_x = int(title_x) + ci * char_advance
+                        drawtext_opts = (
+                            f"drawtext=fontfile='{font_esc}':textfile='{ch_txt_esc}'"
+                            f":fontsize={title_size}:fontcolor={tc}"
+                            f":x={ch_x}:y={line_y}"
+                            f":box=0:bordercolor={sc}:borderw={bw}"
+                        )
+                        vf_parts.append(drawtext_opts)
+                else:
+                    # Write each line to its own tiny temp file (handles Unicode safely)
+                    line_txt_name = f"job_{job_id}_title_line{i}.txt"
+                    line_txt_path = os.path.join(DOWNLOADS_DIR, line_txt_name)
+                    with open(line_txt_path, 'w', encoding='utf-8') as _lf:
+                        _lf.write(line)
+                    line_txt_esc = line_txt_path.replace('\\', '/').replace(':', '\\:')
+
+                    # FFmpeg drawtext y = top of the glyph ascender = top of the bounding
+                    # box, which is exactly title_y as stored from the canvas drag.
+                    # No ascent offset is needed: the canvas stores titlePos.y as the top
+                    # of the box; FFmpeg y is also the top of the box.
+                    drawtext_opts = (
+                        f"drawtext=fontfile='{font_esc}':textfile='{line_txt_esc}'"
+                        f":fontsize={title_size}:fontcolor={tc}"
+                        f":x={title_x}:y={line_y}"
+                        f":box=0:bordercolor={sc}:borderw={bw}"
+                    )
+                    if title_letter_sp:
+                        drawtext_opts += f":letter_spacing={title_letter_sp}"
+                    vf_parts.append(drawtext_opts)
 
         # Always write the filter graph to a script file and use
         # -filter_complex_script so Windows never interprets special characters
