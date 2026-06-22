@@ -276,6 +276,22 @@
               </select>
             </div>
           </div>
+          <div class="ctrl-row">
+            <div style="width:52px;"><label>Out px</label>
+              <input type="number" name="title_outline_w" id="titleOutlineW" class="form-control form-control-sm"
+                     value="{{ job.title_outline_w or 2 }}" min="0" max="20" step="0.5">
+            </div>
+            <div class="form-check" style="margin-bottom:2px;">
+              <input type="checkbox" class="form-check-input" name="title_bg_enabled" id="titleBgEnabled"
+                     value="1" {% if job.title_bg_enabled %}checked{% endif %}>
+              <label class="form-check-label" style="font-size:0.65rem;" for="titleBgEnabled">BG</label>
+            </div>
+            <div class="sp-swatch"><input type="color" name="title_bg_color" id="titleBgColor" value="{{ job.title_bg_color or '#000000' }}"><label>Color</label></div>
+            <div style="width:56px;"><label>Op%</label>
+              <input type="number" name="title_bg_opacity" id="titleBgOpacity" class="form-control form-control-sm"
+                     value="{{ job.title_bg_opacity or 60 }}" min="0" max="100">
+            </div>
+          </div>
           <small class="text-muted" style="font-size:0.65rem;">Drag title on canvas to reposition.</small>
         </div>
       </div>
@@ -435,6 +451,10 @@ function collectConfig() {
     title_bold:         document.getElementById('titleBold').checked ? '1' : '',
     title_line_spacing: document.getElementById('titleLineSpacing')?.value || '0',
     title_letter_spacing: document.getElementById('titleLetterSpacing')?.value || '0',
+    title_outline_w:    document.getElementById('titleOutlineW')?.value || '2',
+    title_bg_enabled:   document.getElementById('titleBgEnabled')?.checked ? '1' : '',
+    title_bg_color:     document.getElementById('titleBgColor')?.value || '#000000',
+    title_bg_opacity:   document.getElementById('titleBgOpacity')?.value || '60',
     sub_font:           document.getElementById('subFont').value,
     sub_bold:           document.getElementById('subBold').checked ? '1' : '',
     sub_size:           document.getElementById('subSize').value,
@@ -470,6 +490,8 @@ function applyConfig(cfg) {
     'titleColor':'title_color','titleStrokeColor':'title_stroke_color',
     'titleX':'title_x','titleY':'title_y','titleBold':'title_bold',
     'titleLineSpacing':'title_line_spacing','titleLetterSpacing':'title_letter_spacing',
+    'titleOutlineW':'title_outline_w','titleBgEnabled':'title_bg_enabled',
+    'titleBgColor':'title_bg_color','titleBgOpacity':'title_bg_opacity',
     'subFont':'sub_font','subSize':'sub_size','subColor':'sub_color',
     'subLineSpacing':'sub_line_spacing','subLetterSpacing':'sub_letter_spacing',
     'subHighlightColor':'sub_highlight_color',
@@ -504,7 +526,11 @@ function applyConfig(cfg) {
   document.getElementById('subHlBox').value = cfg.sub_hl_box || 16;
   document.getElementById('subBgEnabled').checked = cfg.sub_bg_enabled === '1';
   document.getElementById('titleBold').checked = cfg.title_bold === '1';
+  document.getElementById('titleBgEnabled').checked = cfg.title_bg_enabled === '1';
   document.getElementById('subBold').checked = cfg.sub_bold === '1';
+  document.getElementById('titleOutlineW').value = cfg.title_outline_w || 2;
+  document.getElementById('titleBgColor').value = cfg.title_bg_color || '#000000';
+  document.getElementById('titleBgOpacity').value = cfg.title_bg_opacity || 60;
   document.getElementById('subBgColor').value = cfg.sub_bg_color || '#000000';
   document.getElementById('subBgOpacity').value = cfg.sub_bg_opacity || 60;
   titlePos.x = parseInt(cfg.title_x) || 10;
