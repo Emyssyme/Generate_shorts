@@ -1536,6 +1536,47 @@ def _probe_hardware():
 
 _probe_hardware()
 
+# ── runtime encoder probe ─────────────────────────────────────────────
+# ffmpeg -encoders lists every encoder that was compiled in, but the
+# actual hardware may be unavailable (e.g. Intel QSV without a working
+# VAAPI device).  This cache holds the result of a real encode attempt
+# so we never select an encoder that will fail at render time.
+_ENCODER_WORKS_CACHE = {}
+
+def _probe_encoder_works(encoder_name):
+    """Return True if *encoder_name* can successfully encode a tiny frame."""
+    if encoder_name in _ENCODER_WORKS_CACHE:
+        return _ENCODER_WORKS_CACHE[encoder_name]
+
+    probe_out = os.path.join(DOWNLOADS_DIR, f'_enc_probe_{encoder_name}.mp4')
+    try:
+        result = subprocess.run([
+            'ffmpeg', '-nostdin', '-v', 'error',
+            '-f', 'lavfi', '-i', 'color=size=32x32:rate=1:duration=0.1',
+            '-c:v', encoder_name, '-t', '0.1',
+            '-f', 'mp4', '-y', probe_out
+        ], capture_output=True, text=True, timeout=15, env=ffmpeg_env())
+        works = (result.returncode == 0
+                 and os.path.exists(probe_out)
+                 and os.path.getsize(probe_out) > 0)
+        if not works and result.stderr:
+            # surface the first line of the error so the admin can diagnose
+            first_line = result.stderr.strip().split('\n')[0]
+            print(f"Encoder {encoder_name} probe failed: {first_line}")
+    except Exception as exc:
+        print(f"Encoder {encoder_name} probe crashed: {exc}")
+        works = False
+    finally:
+        try:
+            if os.path.exists(probe_out):
+                os.remove(probe_out)
+        except Exception:
+            pass
+
+    _ENCODER_WORKS_CACHE[encoder_name] = works
+    return works
+
+
 def select_auto_gpu_encoder():
     """Return the best supported GPU encoder based on actual hardware, or None.
 
@@ -1545,16 +1586,16 @@ def select_auto_gpu_encoder():
     # If NVIDIA GPU is actually present, try NVENC first
     if _NVIDIA_SMI_OK:
         for enc in ('h264_nvenc', 'hevc_nvenc'):
-            if ffmpeg_supports_encoder(enc):
+            if ffmpeg_supports_encoder(enc) and _probe_encoder_works(enc):
                 return enc
-    # If Intel QSV is actually present, use it
+    # If Intel QSV is actually present, use it (but verify VAAPI works)
     if _INTEL_QSV_OK:
         for enc in ('h264_qsv', 'hevc_qsv'):
-            if ffmpeg_supports_encoder(enc):
+            if ffmpeg_supports_encoder(enc) and _probe_encoder_works(enc):
                 return enc
     # Fallback: try any encoder ffmpeg knows about (unlikely but safe)
     for encoder in GPU_ENCODER_QUALITY:
-        if ffmpeg_supports_encoder(encoder):
+        if ffmpeg_supports_encoder(encoder) and _probe_encoder_works(encoder):
             return encoder
     return None
 
