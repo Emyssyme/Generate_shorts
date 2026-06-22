@@ -680,11 +680,9 @@ def title_to_ass(title_text, ass_path, font_name, font_size, color, stroke_color
                  line_spacing=0, video_width=1080, video_height=1920):
     """Generate an ASS file for a static title with adjustable line-spacing.
 
-    All non-empty lines are merged into a **single** Dialogue event separated
-    by ``\\N`` (ASS hard newline).  Extra line-spacing is injected as an
-    invisible spacer character (``\\u200B``, zero-width space) styled with
-    ``\\fs<spacer_px>`` between each pair of lines, giving pixel-accurate
-    control over the gap.
+    Each non-empty line gets its **own** Dialogue event with an explicit
+    ``\\pos`` tag — no ``\\N`` newlines, no invisible spacer characters.
+    Line height = font_size × 1.2 + line_spacing, matching the canvas preview.
     """
     non_empty = [l for l in title_text.split('\n') if l]
     if not non_empty:
@@ -694,6 +692,7 @@ def title_to_ass(title_text, ass_path, font_name, font_size, color, stroke_color
 
     ass_color = html_to_ass_color(color)
     ass_stroke = html_to_ass_color(stroke_color)
+    ass_bold_flag = 1 if bold else 0
 
     header = f"""[Script Info]
 ScriptType: v4.00+
@@ -703,25 +702,23 @@ WrapStyle: 2
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: TitleStyle,{font_name},{font_size},{ass_color},&H00FFFFFF,{ass_stroke},&H00000000,{1 if bold else 0},0,0,0,100,100,{letter_spacing},0,1,{stroke_width},0,7,0,0,0,1
+Style: TitleStyle,{font_name},{font_size},{ass_color},&H00FFFFFF,{ass_stroke},&H00000000,{ass_bold_flag},0,0,0,100,100,{letter_spacing},0,1,{stroke_width},0,7,0,0,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
-    # Build combined text: insert invisible spacer + \\N between lines
-    if line_spacing > 0:
-        spacer = f"{{\\fs{line_spacing}}}\\u200B\\N{{\\fs{font_size}}}"
-        combined = spacer.join(non_empty)
-    else:
-        combined = "\\N".join(non_empty)
+    # One Dialogue per line — no invisible characters, no \N, just pure \pos
+    lh = font_size * 1.2 + line_spacing
+    dialogues = []
+    for i, line in enumerate(non_empty):
+        y = int(title_y + i * lh)
+        dialogues.append(
+            f"Dialogue: 0,0:00:00.00,99:59:59.99,TitleStyle,,0,0,0,,"
+            f"{{\\an7}}{{\\pos({title_x},{y})}}{line}"
+        )
 
-    dialogue = (
-        f"Dialogue: 0,0:00:00.00,99:59:59.99,TitleStyle,,0,0,0,,"
-        f"{{\\pos({title_x},{title_y})}}{combined}"
-    )
-
-    content = header + dialogue + "\n"
+    content = header + "\n".join(dialogues) + "\n"
     with open(ass_path, 'w', encoding='utf-8', newline='\n') as f:
         f.write(content)
 
@@ -2096,9 +2093,9 @@ def editor(job_id):
         vf_parts = list(pre_filters)  # pre_filters go first
         fonts_dir_esc = FONTS_DIR.replace('\\', '/').replace(':', '\\:')
 
+        # Use base font family + Bold=1 flag.  fontconfig resolves bold by weight.
+        # (The canvas @font-face uses "FontName Bold" — that's a separate browser convention.)
         effective_sub_font = sub_font
-        # Use Bold=1 in ASS force_style instead of appending " Bold" to FontName,
-        # because the true font family (e.g. Inter) is just the base name.
         sub_bold_flag = 'Bold=1' if sub_bold else ''
 
         if has_srt:
@@ -2144,7 +2141,7 @@ def editor(job_id):
                         f"OutlineColour={html_to_ass_color(sub_stroke)},"
                         f"BackColour={bg_ass},"
                         f"BorderStyle=3,Outline={sub_outline_w},Shadow=1,"
-                        f"Alignment=2,MarginV={sub_y}"
+                        f"Alignment=2,MarginL=0,MarginR=0,MarginV={sub_y}"
                     )
                     if sub_bold_flag:
                         sub_style += f",{sub_bold_flag}"
@@ -2156,7 +2153,7 @@ def editor(job_id):
                         f"FontName={effective_sub_font},FontSize={sub_size},"
                         f"PrimaryColour={html_to_ass_color(sub_color)},"
                         f"OutlineColour={html_to_ass_color(sub_stroke)},"
-                        f"Outline={sub_outline_w},Alignment=2,MarginV={sub_y}"
+                        f"Outline={sub_outline_w},Alignment=2,MarginL=0,MarginR=0,MarginV={sub_y}"
                     )
                     if sub_bold_flag:
                         sub_style += f",{sub_bold_flag}"
@@ -2176,7 +2173,7 @@ def editor(job_id):
                         f"OutlineColour={html_to_ass_color(sub_stroke)},"
                         f"BackColour={bg_ass},"
                         f"BorderStyle=3,Outline={sub_outline_w},Shadow=1,"
-                        f"Alignment=2,MarginV={sub_y}"
+                        f"Alignment=2,MarginL=0,MarginR=0,MarginV={sub_y}"
                     )
                     if sub_bold_flag:
                         sub_style += f",{sub_bold_flag}"
@@ -2185,7 +2182,7 @@ def editor(job_id):
                         f"FontName={effective_sub_font},FontSize={sub_size},"
                         f"PrimaryColour={html_to_ass_color(sub_color)},"
                         f"OutlineColour={html_to_ass_color(sub_stroke)},"
-                        f"Outline={sub_outline_w},Alignment=2,MarginV={sub_y}"
+                        f"Outline={sub_outline_w},Alignment=2,MarginL=0,MarginR=0,MarginV={sub_y}"
                     )
                     if sub_bold_flag:
                         sub_style += f",{sub_bold_flag}"
@@ -2208,6 +2205,9 @@ def editor(job_id):
             title_bg_enabled = job.get('title_bg_enabled', False)
             title_bg_color = job.get('title_bg_color', '#000000')
             title_bg_opacity = int(job.get('title_bg_opacity', '60') or 60)
+            # Clamp title position so it never goes out of frame
+            safe_title_x = max(0, min(vid_w - 10, int(title_x)))
+            safe_title_y = max(0, min(vid_h - 10, int(title_y)))
             title_to_ass(
                 title_text=title_text,
                 ass_path=title_ass_path,
@@ -2218,14 +2218,15 @@ def editor(job_id):
                 stroke_width=title_outline_w,
                 bold=title_bold,
                 letter_spacing=title_letter_sp,
-                title_x=int(title_x),
-                title_y=int(title_y),
+                title_x=safe_title_x,
+                title_y=safe_title_y,
                 line_spacing=title_line_sp,
                 video_width=vid_w,
                 video_height=vid_h,
             )
             title_ass_abs = title_ass_path.replace('\\', '/').replace(':', '\\:')
-            # force_style keeps the ASS file itself minimal; all styling travels here
+            # force_style must match the ASS Style line: base font name + Bold flag
+            # Explicit MarginL/MarginR/MarginV=0 to prevent any hidden renderer defaults
             if title_bg_enabled:
                 ass_alpha = format(int(255 * (1 - title_bg_opacity / 100)), '02X')
                 bg_ass = f"&H{ass_alpha}" + html_to_ass_color(title_bg_color)[3:]
@@ -2235,7 +2236,8 @@ def editor(job_id):
                     f"OutlineColour={html_to_ass_color(title_stroke)},"
                     f"BackColour={bg_ass},"
                     f"BorderStyle=3,Outline={title_outline_w},Shadow=1,"
-                    f"Alignment=7,Bold={1 if title_bold else 0}"
+                    f"Alignment=7,Bold={1 if title_bold else 0},"
+                    f"MarginL=0,MarginR=0,MarginV=0"
                 )
             else:
                 title_style = (
@@ -2243,7 +2245,8 @@ def editor(job_id):
                     f"PrimaryColour={html_to_ass_color(title_color)},"
                     f"OutlineColour={html_to_ass_color(title_stroke)},"
                     f"Outline={title_outline_w},"
-                    f"Alignment=7,Bold={1 if title_bold else 0}"
+                    f"Alignment=7,Bold={1 if title_bold else 0},"
+                    f"MarginL=0,MarginR=0,MarginV=0"
                 )
             if title_letter_sp:
                 title_style += f",Spacing={title_letter_sp}"

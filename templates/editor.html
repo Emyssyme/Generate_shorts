@@ -978,27 +978,39 @@ function drawFrame() {
     ctx.restore();
   }
 
-  // title – titlePos.y is top of the first line (same coord system as FFmpeg drawtext)
+  // title – titlePos.y is top of the first line (same coord system as FFmpeg ASS \pos)
   if (c.titleText) {
     ctx.save();
     const titleLetterSp = c.titleLetterSpacing || 0;
-    // Use the actual Bold font family when bold is enabled, matching FFmpeg behaviour.
-    // CSS font-weight:'bold' would trigger browser faux-bold instead of the real bold file.
+    // Canvas @font-face loads "Inter Bold" etc. as separate families.
     const effectiveTitleFont = c.titleBold ? (c.titleFont + ' Bold') : c.titleFont;
     ctx.font = `normal ${c.titleSize}px "${effectiveTitleFont}", sans-serif`;
-    ctx.letterSpacing = titleLetterSp + 'px';  // canvas letter-spacing (experimental but widely supported)
-    ctx.lineWidth = Math.max(1, c.titleSize / 14);
+    // Use explicit outline width from the form (same value sent to ASS)
+    const outlineW = parseFloat(document.getElementById('titleOutlineW')?.value) || 2;
+    ctx.lineWidth = Math.max(0.5, outlineW);
     ctx.strokeStyle = c.titleStroke; ctx.fillStyle = c.titleColor;
+    ctx.letterSpacing = '0px';   // we handle spacing manually to avoid leading-space bugs
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';     // match ASS Alignment=7: y = top of text
     const lines = c.titleText.split('\n');
-    // line height matches FFmpeg drawtext: natural font height (~1.2×) + user line_spacing
     const lh = c.titleSize * 1.2 + (c.titleLineSpacing || 0);
-    // First baseline = top + approx. ascent (0.8× font-size is a good average across fonts)
-    const ascent = c.titleSize * 0.8;
-    let cy = titlePos.y + ascent, maxW = 0;
+    let cy = titlePos.y, maxW = 0;
     const totalH = lines.length * lh;
     lines.forEach(line => {
-      ctx.strokeText(line, titlePos.x, cy); ctx.fillText(line, titlePos.x, cy);
-      const w = ctx.measureText(line).width; if (w > maxW) maxW = w;
+      if (titleLetterSp) {
+        // Draw each char with manual spacing so the first char starts exactly at titlePos.x
+        let cx = titlePos.x;
+        for (const ch of line) {
+          ctx.fillText(ch, cx, cy);
+          ctx.strokeText(ch, cx, cy);
+          cx += ctx.measureText(ch).width + titleLetterSp;
+        }
+        maxW = Math.max(maxW, cx - titlePos.x - titleLetterSp);
+      } else {
+        ctx.fillText(line, titlePos.x, cy);
+        ctx.strokeText(line, titlePos.x, cy);
+        maxW = Math.max(maxW, ctx.measureText(line).width);
+      }
       cy += lh;
     });
     ctx.letterSpacing = '0px';
