@@ -2084,10 +2084,12 @@ def editor(job_id):
         fc_script_path = os.path.join(DOWNLOADS_DIR, fc_script_name)
 
         render_quality = list(VIDEO_QUALITY)
+        gpu_encoder_used = False   # track so we can fall back to CPU on runtime failure
         if gpu_mode == 'auto':
             selected_gpu = select_auto_gpu_encoder()
             if selected_gpu:
                 render_quality = list(GPU_ENCODER_QUALITY[selected_gpu])
+                gpu_encoder_used = True
                 update_job(job_id, log=f"auto GPU mode selected {selected_gpu}")
             else:
                 update_job(job_id, log="auto GPU mode selected but no supported encoder found, using CPU")
@@ -2095,6 +2097,7 @@ def editor(job_id):
         elif gpu_mode in GPU_ENCODER_QUALITY:
             if ffmpeg_supports_encoder(gpu_mode):
                 render_quality = list(GPU_ENCODER_QUALITY[gpu_mode])
+                gpu_encoder_used = True
                 update_job(job_id, log=f"using GPU encoder {gpu_mode}")
             else:
                 update_job(job_id, log=f"GPU encoder {gpu_mode} unavailable, falling back to CPU")
@@ -2112,6 +2115,8 @@ def editor(job_id):
             scale_filter = f"scale={export_res_w}:{export_res_h}:force_original_aspect_ratio=decrease,pad={export_res_w}:{export_res_h}:(ow-iw)/2:(oh-ih)/2"
             vf_parts.insert(0, scale_filter)  # always prepend so it applies first
 
+        # ── build ffmpeg command prefix (everything before the encoder args) ──
+        cmd_suffix = ['-c:a', 'copy', new_video_name]
         if has_overlay:
             ov_scale = f"[1:v]scale={overlay_w}:{overlay_h}[ov]"
             if vf_parts:
@@ -2132,20 +2137,18 @@ def editor(job_id):
                 _fc.write(fc)
             update_job(job_id, log=f"filter_complex (overlay): {fc}")
             if ffmpeg_supports_filter_complex_script():
-                cmd = [
+                cmd_prefix = [
                     'ffmpeg', '-nostdin', '-y',
                     '-i', orig_video, '-i', overlay_path,
                     '-filter_complex_script', fc_script_name,
                     '-map', out_label, '-map', '0:a?',
-                    *render_quality, '-c:a', 'copy', new_video_name,
                 ]
             else:
-                cmd = [
+                cmd_prefix = [
                     'ffmpeg', '-nostdin', '-y',
                     '-i', orig_video, '-i', overlay_path,
                     '-filter_complex', fc,
                     '-map', out_label, '-map', '0:a?',
-                    *render_quality, '-c:a', 'copy', new_video_name,
                 ]
         elif vf_parts:
             vf_chain = ','.join(vf_parts)
@@ -2154,31 +2157,41 @@ def editor(job_id):
                 _fc.write(fc)
             update_job(job_id, log=f"filter_complex (no overlay): {fc}")
             if ffmpeg_supports_filter_complex_script():
-                cmd = [
+                cmd_prefix = [
                     'ffmpeg', '-nostdin', '-y', '-fontsdir', FONTS_DIR,
                     '-i', orig_video,
                     '-filter_complex_script', fc_script_name,
                     '-map', '[vout]', '-map', '0:a?',
-                    *render_quality, '-c:a', 'copy', new_video_name,
                 ]
             else:
-                cmd = [
+                cmd_prefix = [
                     'ffmpeg', '-nostdin', '-y', '-fontsdir', FONTS_DIR,
                     '-i', orig_video,
                     '-filter_complex', fc,
                     '-map', '[vout]', '-map', '0:a?',
-                    *render_quality, '-c:a', 'copy', new_video_name,
                 ]
         else:
-            cmd = ['ffmpeg', '-nostdin', '-y',
-                   '-i', orig_video,
-                   *render_quality, '-c:a', 'copy', new_video_name]
+            cmd_prefix = ['ffmpeg', '-nostdin', '-y',
+                          '-i', orig_video]
 
-        update_job(job_id, log=f"ffmpeg: {' '.join(cmd)}")
-        result = subprocess.run(cmd, cwd=DOWNLOADS_DIR, capture_output=True, text=True,
-                                encoding='utf-8', errors='replace', env=ffmpeg_env())
-        if result.returncode != 0:
+        # ── execute (with automatic GPU→CPU fallback) ────────────────────
+        encoders_to_try = [render_quality]
+        if gpu_encoder_used:
+            encoders_to_try.append(list(VIDEO_QUALITY))  # CPU fallback
+
+        result = None
+        for attempt_idx, encoder_params in enumerate(encoders_to_try):
+            cmd = cmd_prefix + encoder_params + cmd_suffix
+            if attempt_idx > 0:
+                update_job(job_id, log=f"GPU encoder failed, retrying with CPU (libx264)")
+            update_job(job_id, log=f"ffmpeg: {' '.join(cmd)}")
+            result = subprocess.run(cmd, cwd=DOWNLOADS_DIR, capture_output=True, text=True,
+                                    encoding='utf-8', errors='replace', env=ffmpeg_env())
+            if result.returncode == 0:
+                break
             update_job(job_id, log=f"ffmpeg stderr: {result.stderr[-600:]}")
+
+        if result is None or result.returncode != 0:
             flash('Render failed — check server logs for details.', 'danger')
         else:
             # sanity checks: output file should exist and be non-trivial size
