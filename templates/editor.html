@@ -386,6 +386,71 @@
         </div>
       </div>
 
+      <!-- VIDEO ADJUSTMENTS (trim, crop, speed, audio) -->
+      <div class="ctrl-section">
+        <div class="section-header collapsed" onclick="this.classList.toggle('collapsed'); this.nextElementSibling.classList.toggle('d-none')">
+          <i class="bi bi-scissors"></i> Video Adjustments <i class="bi bi-chevron-down collapse-icon ms-auto"></i>
+        </div>
+        <div class="section-body d-none">
+          <!-- Trim -->
+          <div class="ctrl-row">
+            <div style="flex:1;min-width:80px;"><label>Trim Start</label>
+              <input type="text" name="trim_start" id="trimStart" class="form-control form-control-sm"
+                     value="{{ job.trim_start or '' }}" placeholder="0:00 or 0">
+            </div>
+            <div style="flex:1;min-width:80px;"><label>Trim End</label>
+              <input type="text" name="trim_end" id="trimEnd" class="form-control form-control-sm"
+                     value="{{ job.trim_end or '' }}" placeholder="0:30 or 30">
+            </div>
+            <button type="button" id="setTrimFromSlider" class="btn btn-sm btn-outline-secondary" title="Set trim from timeline position">
+              <i class="bi bi-clock"></i> From cursor
+            </button>
+          </div>
+          <!-- Crop -->
+          <div class="ctrl-row">
+            <div style="width:62px;"><label>X</label>
+              <input type="number" name="crop_x" id="cropX" class="form-control form-control-sm"
+                     value="{{ job.crop_x or '' }}" placeholder="0" min="0" step="2">
+            </div>
+            <div style="width:62px;"><label>Y</label>
+              <input type="number" name="crop_y" id="cropY" class="form-control form-control-sm"
+                     value="{{ job.crop_y or '' }}" placeholder="0" min="0" step="2">
+            </div>
+            <div style="width:68px;"><label>Width</label>
+              <input type="number" name="crop_w" id="cropW" class="form-control form-control-sm"
+                     value="{{ job.crop_w or '' }}" placeholder="auto" min="1" step="2">
+            </div>
+            <div style="width:68px;"><label>Height</label>
+              <input type="number" name="crop_h" id="cropH" class="form-control form-control-sm"
+                     value="{{ job.crop_h or '' }}" placeholder="auto" min="1" step="2">
+            </div>
+            <button type="button" id="resetCropBtn" class="btn btn-sm btn-outline-secondary" title="Clear crop">
+              <i class="bi bi-x-circle"></i>
+            </button>
+          </div>
+          <!-- Speed & Audio -->
+          <div class="ctrl-row">
+            <div style="flex:1;min-width:100px;"><label>Speed</label>
+              <div class="size-row">
+                <input type="range" id="speedRange" min="25" max="200" value="{{ (job.video_speed or '1.0') | float * 100 | int }}">
+                <input type="number" name="video_speed" id="videoSpeed" class="form-control form-control-sm sp-num"
+                       value="{{ job.video_speed or '1.0' }}" min="0.25" max="4.0" step="0.05">
+              </div>
+            </div>
+            <div style="flex:1;min-width:100px;"><label>Audio Boost (dB)</label>
+              <div class="size-row">
+                <input type="range" id="audioRange" min="-20" max="20" value="{{ job.audio_boost_db or 0 }}">
+                <input type="number" name="audio_boost" id="audioBoost" class="form-control form-control-sm sp-num"
+                       value="{{ job.audio_boost_db or 0 }}" min="-20" max="20" step="0.5">
+              </div>
+            </div>
+          </div>
+          <small class="text-muted" style="font-size:0.65rem;">
+            Trim: enter seconds or HH:MM:SS. Speed: 0.5=half, 2.0=double. Crop fields are in pixels.
+          </small>
+        </div>
+      </div>
+
       <!-- ADVANCED EXPORT -->
       <div class="ctrl-section">
         <div class="section-header collapsed" onclick="this.classList.toggle('collapsed'); this.nextElementSibling.classList.toggle('d-none')">
@@ -422,10 +487,15 @@
         <button type="submit" class="btn btn-sm btn-primary fw-semibold" id="renderBtn" name="render" value="1">
           <i class="bi bi-film"></i> Render
         </button>
+        <button type="button" class="btn btn-sm btn-outline-info" id="previewBtn" title="Quick low-quality preview">
+          <i class="bi bi-eye"></i> Preview
+        </button>
         <a href="/download/{{ job.video }}" class="btn btn-sm" style="background:var(--accent2);color:#fff;">
           <i class="bi bi-download"></i> Download
         </a>
       </div>
+      <!-- Hidden preview mode toggle -->
+      <input type="hidden" name="preview_mode" id="previewMode" value="0">
     </div>
   </div>
 </form>
@@ -481,6 +551,14 @@ function collectConfig() {
     export_bitrate:     document.getElementById('exportBitrate')?.value || '',
     export_res_w:       document.getElementById('exportResW')?.value || '',
     export_res_h:       document.getElementById('exportResH')?.value || '',
+    trim_start:         document.getElementById('trimStart')?.value || '',
+    trim_end:           document.getElementById('trimEnd')?.value || '',
+    crop_x:             document.getElementById('cropX')?.value || '',
+    crop_y:             document.getElementById('cropY')?.value || '',
+    crop_w:             document.getElementById('cropW')?.value || '',
+    crop_h:             document.getElementById('cropH')?.value || '',
+    video_speed:        document.getElementById('videoSpeed')?.value || '1.0',
+    audio_boost_db:     document.getElementById('audioBoost')?.value || '0',
   };
 }
 
@@ -506,6 +584,10 @@ function applyConfig(cfg) {
     'gpuMode':'gpu_mode',
     'exportFps':'export_fps','exportBitrate':'export_bitrate',
     'exportResW':'export_res_w','exportResH':'export_res_h',
+    'trimStart':'trim_start','trimEnd':'trim_end',
+    'cropX':'crop_x','cropY':'crop_y',
+    'cropW':'crop_w','cropH':'crop_h',
+    'videoSpeed':'video_speed','audioBoost':'audio_boost_db',
   };
   for (const [domId, cfgKey] of Object.entries(fields)) {
     const el = document.getElementById(domId);
@@ -533,6 +615,13 @@ function applyConfig(cfg) {
   document.getElementById('titleBgOpacity').value = cfg.title_bg_opacity || 60;
   document.getElementById('subBgColor').value = cfg.sub_bg_color || '#000000';
   document.getElementById('subBgOpacity').value = cfg.sub_bg_opacity || 60;
+  // Speed & audio
+  const speedVal = parseFloat(cfg.video_speed) || 1.0;
+  document.getElementById('speedRange').value = Math.round(speedVal * 100);
+  document.getElementById('videoSpeed').value = speedVal.toFixed(2);
+  const audioVal = parseFloat(cfg.audio_boost_db) || 0;
+  document.getElementById('audioRange').value = Math.round(audioVal);
+  document.getElementById('audioBoost').value = audioVal;
   titlePos.x = parseInt(cfg.title_x) || 10;
   titlePos.y = parseInt(cfg.title_y) || 80;
   overlayPos.x = parseInt(cfg.overlay_x) || 10;
@@ -1103,5 +1192,53 @@ subRange.addEventListener('input', () => { subNum.value = subRange.value; });
 subNum.addEventListener('input', () => { subRange.value = subNum.value; });
 const subYNum = document.getElementById('subYNum');
 if (subYNum) { subYNum.addEventListener('input', () => { subPos.y = parseInt(subYNum.value) || 30; document.getElementById('subY').value = subPos.y; }); }
+
+// ═══════════════════════════════════════════════
+//  Speed & audio range sync
+// ═══════════════════════════════════════════════
+const speedRange = document.getElementById('speedRange'), speedNum = document.getElementById('videoSpeed');
+if (speedRange && speedNum) {
+  speedRange.addEventListener('input', () => { speedNum.value = (speedRange.value / 100).toFixed(2); });
+  speedNum.addEventListener('input', () => { const v = parseFloat(speedNum.value) * 100; if (v >= 25 && v <= 200) speedRange.value = Math.round(v); });
+}
+const audioRange = document.getElementById('audioRange'), audioNum = document.getElementById('audioBoost');
+if (audioRange && audioNum) {
+  audioRange.addEventListener('input', () => { audioNum.value = audioRange.value; });
+  audioNum.addEventListener('input', () => { const v = parseFloat(audioNum.value); if (v >= -20 && v <= 20) audioRange.value = Math.round(v); });
+}
+
+// ═══════════════════════════════════════════════
+//  Trim from timeline cursor
+// ═══════════════════════════════════════════════
+document.getElementById('setTrimFromSlider')?.addEventListener('click', () => {
+  const t = video.currentTime;
+  const startEl = document.getElementById('trimStart'), endEl = document.getElementById('trimEnd');
+  if (!startEl.value) { startEl.value = t.toFixed(1); }
+  else if (!endEl.value) { endEl.value = t.toFixed(1); }
+  else { endEl.value = t.toFixed(1); }
+});
+
+// ═══════════════════════════════════════════════
+//  Reset crop
+// ═══════════════════════════════════════════════
+document.getElementById('resetCropBtn')?.addEventListener('click', () => {
+  document.getElementById('cropX').value = '';
+  document.getElementById('cropY').value = '';
+  document.getElementById('cropW').value = '';
+  document.getElementById('cropH').value = '';
+});
+
+// ═══════════════════════════════════════════════
+//  Quick Preview button
+// ═══════════════════════════════════════════════
+document.getElementById('previewBtn')?.addEventListener('click', () => {
+  document.getElementById('previewMode').value = '1';
+  const renderBtn = document.getElementById('renderBtn');
+  if (renderBtn) {
+    renderBtn.disabled = true;
+    renderBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Previewing...';
+  }
+  document.getElementById('editForm').requestSubmit(renderBtn);
+});
 </script>
 {% endblock %}

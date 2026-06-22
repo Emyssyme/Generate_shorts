@@ -1722,6 +1722,7 @@ def api_system_info():
     })
 
 
+@app.route('/api/templates', methods=['GET'])
 @login_required
 def api_list_templates():
     return json.dumps(get_all_templates())
@@ -1898,6 +1899,16 @@ def editor(job_id):
         export_bitrate  = request.form.get('export_bitrate', '').strip()
         export_res_w    = request.form.get('export_res_w', '').strip()
         export_res_h    = request.form.get('export_res_h', '').strip()
+        # ── trim / crop / speed / audio controls ─────────────────────────
+        trim_start      = request.form.get('trim_start', '').strip()
+        trim_end        = request.form.get('trim_end', '').strip()
+        crop_x          = request.form.get('crop_x', '').strip()
+        crop_y          = request.form.get('crop_y', '').strip()
+        crop_w          = request.form.get('crop_w', '').strip()
+        crop_h          = request.form.get('crop_h', '').strip()
+        video_speed     = request.form.get('video_speed', '1.0').strip()
+        audio_boost_db  = request.form.get('audio_boost', '0').strip()
+        preview_mode    = request.form.get('preview_mode') == '1'
 
         job.update({
             'title_text': title_text,   'title_font': title_font,
@@ -1932,6 +1943,12 @@ def editor(job_id):
             'export_res_w': export_res_w,
             'export_res_h': export_res_h,
             'gpu_mode': gpu_mode,
+            'trim_start': trim_start,
+            'trim_end': trim_end,
+            'crop_x': crop_x, 'crop_y': crop_y,
+            'crop_w': crop_w, 'crop_h': crop_h,
+            'video_speed': video_speed,
+            'audio_boost_db': audio_boost_db,
         })
 
         # ── download or upload fonts ────────────────────────────────────────
@@ -2015,8 +2032,68 @@ def editor(job_id):
             })
             update_job(job_id, log=f"scaling coords from preview {prev_w}x{prev_h}→{vid_w}x{vid_h}")
 
+        # ── trim / crop / speed / audio pre-filters ─────────────────────
+        pre_filters = []
+        audio_filters = []
+
+        # Validate and parse trim times (in seconds or HH:MM:SS)
+        trim_start_sec = None
+        trim_end_sec = None
+        try:
+            if trim_start:
+                trim_start_sec = _time_to_seconds(trim_start)
+        except (ValueError, TypeError):
+            update_job(job_id, log=f"warning: invalid trim_start '{trim_start}', ignoring")
+        try:
+            if trim_end:
+                trim_end_sec = _time_to_seconds(trim_end)
+        except (ValueError, TypeError):
+            update_job(job_id, log=f"warning: invalid trim_end '{trim_end}', ignoring")
+
+        # Crop filter (x:y:w:h)
+        if all(v for v in [crop_x, crop_y, crop_w, crop_h]):
+            try:
+                cx, cy, cw, ch = int(crop_x), int(crop_y), int(crop_w), int(crop_h)
+                if cw > 0 and ch > 0:
+                    pre_filters.append(f"crop={cw}:{ch}:{cx}:{cy}")
+                    update_job(job_id, log=f"crop filter: {cw}x{ch}+{cx}+{cy}")
+            except (ValueError, TypeError):
+                update_job(job_id, log="warning: invalid crop values, ignoring")
+
+        # Speed filter (setpts for video, atempo for audio)
+        try:
+            speed_val = float(video_speed)
+            if speed_val <= 0:
+                speed_val = 1.0
+            if speed_val != 1.0:
+                # setpts adjusts video speed: setpts=PTS/SPEED
+                pre_filters.append(f"setpts={1.0/speed_val:.4f}*PTS")
+                # atempo adjusts audio speed; atempo range is [0.5, 2.0], chain for extreme values
+                remaining = speed_val
+                atempo_parts = []
+                while remaining > 2.0:
+                    atempo_parts.append("atempo=2.0")
+                    remaining /= 2.0
+                while remaining < 0.5:
+                    atempo_parts.append("atempo=0.5")
+                    remaining /= 0.5
+                atempo_parts.append(f"atempo={remaining:.4f}")
+                audio_filters.append(",".join(atempo_parts))
+                update_job(job_id, log=f"speed: {speed_val}x (video+audio)")
+        except (ValueError, TypeError):
+            pass
+
+        # Audio volume boost
+        try:
+            boost_db = float(audio_boost_db)
+            if boost_db != 0:
+                audio_filters.append(f"volume={boost_db}dB")
+                update_job(job_id, log=f"audio boost: {boost_db}dB")
+        except (ValueError, TypeError):
+            pass
+
         # filters applied after optional overlay compositing
-        vf_parts = []
+        vf_parts = list(pre_filters)  # pre_filters go first
         fonts_dir_esc = FONTS_DIR.replace('\\', '/').replace(':', '\\:')
 
         effective_sub_font = sub_font
@@ -2071,7 +2148,7 @@ def editor(job_id):
                     )
                     if sub_bold_flag:
                         sub_style += f",{sub_bold_flag}"
-                    sub_letter_sp = int(job.get('sub_letter_spacing', 0) or 0)
+                    sub_letter_sp = float(job.get('sub_letter_spacing', 0) or 0)
                     if sub_letter_sp:
                         sub_style += f",Spacing={sub_letter_sp}"
                 else:
@@ -2083,7 +2160,7 @@ def editor(job_id):
                     )
                     if sub_bold_flag:
                         sub_style += f",{sub_bold_flag}"
-                    sub_letter_sp = int(job.get('sub_letter_spacing', 0) or 0)
+                    sub_letter_sp = float(job.get('sub_letter_spacing', 0) or 0)
                     if sub_letter_sp:
                         sub_style += f",Spacing={sub_letter_sp}"
                 vf_parts.append(f"subtitles='{ass_abs}':fontsdir='{fonts_dir_esc}':force_style='{sub_style}'")
@@ -2112,7 +2189,7 @@ def editor(job_id):
                     )
                     if sub_bold_flag:
                         sub_style += f",{sub_bold_flag}"
-                sub_letter_sp = int(job.get('sub_letter_spacing', 0) or 0)
+                sub_letter_sp = float(job.get('sub_letter_spacing', 0) or 0)
                 if sub_letter_sp:
                     sub_style += f",Spacing={sub_letter_sp}"
                 vf_parts.append(f"subtitles='{srt_abs}':fontsdir='{fonts_dir_esc}':force_style='{sub_style}'")
@@ -2125,8 +2202,8 @@ def editor(job_id):
             # event with \\pos for pixel-precise canvas-style placement.
             title_ass_name = f"job_{job_id}_title.ass"
             title_ass_path = os.path.join(DOWNLOADS_DIR, title_ass_name)
-            title_letter_sp = int(job.get('title_letter_spacing', 0) or 0)
-            title_line_sp   = int(job.get('title_line_spacing', 0) or 0)
+            title_letter_sp = float(job.get('title_letter_spacing', 0) or 0)
+            title_line_sp   = int(float(job.get('title_line_spacing', 0) or 0))
             title_outline_w = int(job.get('title_outline_w', '2') or 2)
             title_bg_enabled = job.get('title_bg_enabled', False)
             title_bg_color = job.get('title_bg_color', '#000000')
@@ -2188,12 +2265,23 @@ def editor(job_id):
                 update_job(job_id, log="auto GPU mode selected but no supported encoder found, using CPU")
                 flash('No supported GPU encoder found; using CPU encoder instead.', 'warning')
         elif gpu_mode in GPU_ENCODER_QUALITY:
-            if ffmpeg_supports_encoder(gpu_mode):
+            if ffmpeg_supports_encoder(gpu_mode) and _probe_encoder_works(gpu_mode):
                 render_quality = list(GPU_ENCODER_QUALITY[gpu_mode])
                 update_job(job_id, log=f"using GPU encoder {gpu_mode}")
             else:
                 update_job(job_id, log=f"GPU encoder {gpu_mode} unavailable, falling back to CPU")
-                flash('Requested GPU render mode unavailable; using CPU encoder instead.', 'warning')
+                flash(f'GPU encoder {gpu_mode} unavailable; using CPU encoder instead.', 'warning')
+        # ── preview mode: use ultrafast preset & lower quality ──────────
+        if preview_mode:
+            # Override with fast preview settings
+            render_quality = [
+                '-c:v', 'libx264', '-crf', '28', '-preset', 'ultrafast',
+                '-g', '30', '-keyint_min', '30', '-sc_threshold', '0',
+                '-pix_fmt', 'yuv420p', '-movflags', '+faststart'
+            ]
+            # also limit resolution for faster preview
+            vf_parts.insert(0, 'scale=540:-2')
+            update_job(job_id, log="preview mode: fast render with lower quality")
         # ── apply user export overrides ──────────────────────────────────
         export_fps = job.get('export_fps', '').strip()
         export_bitrate = job.get('export_bitrate', '').strip()
@@ -2226,54 +2314,98 @@ def editor(job_id):
             with open(fc_script_path, 'w', encoding='utf-8') as _fc:
                 _fc.write(fc)
             update_job(job_id, log=f"filter_complex (overlay): {fc}")
-            if ffmpeg_supports_filter_complex_script():
-                cmd = [
-                    'ffmpeg', '-nostdin', '-y',
-                    '-i', orig_video, '-i', overlay_path,
-                    '-filter_complex_script', fc_script_name,
-                    '-map', out_label, '-map', '0:a?',
-                    *render_quality, '-c:a', 'copy', new_video_name,
-                ]
+            use_fc_script = ffmpeg_supports_filter_complex_script()
+            cmd = ['ffmpeg', '-nostdin', '-y']
+            # Trim: -ss before -i for fast seeking
+            if trim_start_sec is not None:
+                cmd.extend(['-ss', f'{trim_start_sec:.3f}'])
+            cmd.extend(['-i', orig_video, '-i', overlay_path])
+            if use_fc_script:
+                cmd.extend(['-filter_complex_script', fc_script_name])
             else:
-                cmd = [
-                    'ffmpeg', '-nostdin', '-y',
-                    '-i', orig_video, '-i', overlay_path,
-                    '-filter_complex', fc,
-                    '-map', out_label, '-map', '0:a?',
-                    *render_quality, '-c:a', 'copy', new_video_name,
-                ]
-        elif vf_parts:
-            vf_chain = ','.join(vf_parts)
-            fc = f"[0:v]{vf_chain}[vout]"
+                cmd.extend(['-filter_complex', fc])
+            cmd.extend(['-map', out_label, '-map', '0:a?'])
+            # Trim end
+            if trim_end_sec is not None and trim_start_sec is not None:
+                dur = trim_end_sec - trim_start_sec
+                if dur > 0:
+                    cmd.extend(['-t', f'{dur:.3f}'])
+            elif trim_end_sec is not None:
+                cmd.extend(['-to', f'{trim_end_sec:.3f}'])
+            # Audio filters
+            if audio_filters:
+                af_chain = ','.join(audio_filters)
+                cmd.extend(['-af', af_chain])
+            cmd.extend(render_quality)
+            cmd.extend(['-c:a', 'aac', '-b:a', '192k', new_video_name])
+        elif vf_parts or audio_filters:
+            if vf_parts:
+                vf_chain = ','.join(vf_parts)
+                fc = f"[0:v]{vf_chain}[vout]"
+                out_label = '[vout]'
+            else:
+                # Only audio filters, pass video through
+                fc = "[0:v]null[vout]"
+                out_label = '[vout]'
             with open(fc_script_path, 'w', encoding='utf-8') as _fc:
                 _fc.write(fc)
             update_job(job_id, log=f"filter_complex (no overlay): {fc}")
-            if ffmpeg_supports_filter_complex_script():
-                cmd = [
-                    'ffmpeg', '-nostdin', '-y', '-fontsdir', FONTS_DIR,
-                    '-i', orig_video,
-                    '-filter_complex_script', fc_script_name,
-                    '-map', '[vout]', '-map', '0:a?',
-                    *render_quality, '-c:a', 'copy', new_video_name,
-                ]
+            use_fc_script = ffmpeg_supports_filter_complex_script()
+            cmd = ['ffmpeg', '-nostdin', '-y', '-fontsdir', FONTS_DIR]
+            # Trim
+            if trim_start_sec is not None:
+                cmd.extend(['-ss', f'{trim_start_sec:.3f}'])
+            cmd.extend(['-i', orig_video])
+            if use_fc_script:
+                cmd.extend(['-filter_complex_script', fc_script_name])
             else:
-                cmd = [
-                    'ffmpeg', '-nostdin', '-y', '-fontsdir', FONTS_DIR,
-                    '-i', orig_video,
-                    '-filter_complex', fc,
-                    '-map', '[vout]', '-map', '0:a?',
-                    *render_quality, '-c:a', 'copy', new_video_name,
-                ]
+                cmd.extend(['-filter_complex', fc])
+            cmd.extend(['-map', out_label, '-map', '0:a?'])
+            # Trim end
+            if trim_end_sec is not None and trim_start_sec is not None:
+                dur = trim_end_sec - trim_start_sec
+                if dur > 0:
+                    cmd.extend(['-t', f'{dur:.3f}'])
+            elif trim_end_sec is not None:
+                cmd.extend(['-to', f'{trim_end_sec:.3f}'])
+            # Audio filters
+            if audio_filters:
+                af_chain = ','.join(audio_filters)
+                cmd.extend(['-af', af_chain])
+            cmd.extend(render_quality)
+            cmd.extend(['-c:a', 'aac', '-b:a', '192k', new_video_name])
         else:
-            cmd = ['ffmpeg', '-nostdin', '-y',
-                   '-i', orig_video,
-                   *render_quality, '-c:a', 'copy', new_video_name]
+            cmd = ['ffmpeg', '-nostdin', '-y']
+            if trim_start_sec is not None:
+                cmd.extend(['-ss', f'{trim_start_sec:.3f}'])
+            cmd.extend(['-i', orig_video])
+            if trim_end_sec is not None and trim_start_sec is not None:
+                dur = trim_end_sec - trim_start_sec
+                if dur > 0:
+                    cmd.extend(['-t', f'{dur:.3f}'])
+            elif trim_end_sec is not None:
+                cmd.extend(['-to', f'{trim_end_sec:.3f}'])
+            if audio_filters:
+                af_chain = ','.join(audio_filters)
+                cmd.extend(['-af', af_chain])
+            cmd.extend(render_quality)
+            cmd.extend(['-c:a', 'aac', '-b:a', '192k', new_video_name])
 
         update_job(job_id, log=f"ffmpeg: {' '.join(cmd)}")
-        result = subprocess.run(cmd, cwd=DOWNLOADS_DIR, capture_output=True, text=True,
-                                encoding='utf-8', errors='replace', env=ffmpeg_env())
+        try:
+            result = subprocess.run(cmd, cwd=DOWNLOADS_DIR, capture_output=True, text=True,
+                                    encoding='utf-8', errors='replace', env=ffmpeg_env(), timeout=1800)
+        except subprocess.TimeoutExpired:
+            update_job(job_id, status='error', log='Render timed out after 30 minutes')
+            flash('Render timed out — the video may be too long or complex.', 'danger')
+            return redirect(url_for('editor', job_id=job_id))
+        except Exception as exc:
+            update_job(job_id, status='error', log=f'Render crashed: {exc}')
+            flash(f'Render crashed: {exc}', 'danger')
+            return redirect(url_for('editor', job_id=job_id))
         if result.returncode != 0:
-            update_job(job_id, log=f"ffmpeg stderr: {result.stderr[-600:]}")
+            stderr_tail = (result.stderr or '')[-800:]
+            update_job(job_id, log=f"ffmpeg stderr: {stderr_tail}")
             flash('Render failed — check server logs for details.', 'danger')
         else:
             # sanity checks: output file should exist and be non-trivial size
