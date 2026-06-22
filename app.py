@@ -675,6 +675,52 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         f.write(content)
 
 
+def title_to_ass(title_text, ass_path, font_name, font_size, color, stroke_color,
+                 stroke_width, bold, letter_spacing, title_x=10, title_y=80,
+                 line_spacing=0, video_width=1080, video_height=1920):
+    """Generate an ASS file for a static title with per-line \\pos(x,y) tags.
+
+    Each line of ``title_text`` becomes a Dialogue event covering the full
+    video duration.  Pixel-precise positioning is achieved via the \\pos
+    override tag, matching the canvas editor's coordinate system exactly.
+
+    Letter-spacing is baked into the Style ``Spacing`` field so it survives
+    into the exported video regardless of the FFmpeg/libass version.
+    """
+    lines = title_text.split('\n')
+    ass_color = html_to_ass_color(color)
+    ass_stroke = html_to_ass_color(stroke_color)
+
+    header = f"""[Script Info]
+ScriptType: v4.00+
+PlayResX: {video_width}
+PlayResY: {video_height}
+WrapStyle: 2
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: TitleStyle,{font_name},{font_size},{ass_color},&H00FFFFFF,{ass_stroke},&H00000000,{1 if bold else 0},0,0,0,100,100,{letter_spacing},0,1,{stroke_width},0,7,0,0,0,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+
+    dialogue_lines = []
+    lh = int(int(font_size) * 1.2) + int(line_spacing)
+
+    for i, line in enumerate(lines):
+        if not line:
+            continue
+        y_pos = int(title_y) + i * lh
+        dialogue_lines.append(
+            f"Dialogue: 0,0:00:00.00,99:59:59.99,TitleStyle,,0,0,0,,{{\\pos({title_x},{y_pos})}}{line}"
+        )
+
+    content = header + "\n".join(dialogue_lines) + "\n"
+    with open(ass_path, 'w', encoding='utf-8', newline='\n') as f:
+        f.write(content)
+
+
 def find_script(name):
     """Locate a helper script by name in the current directory or its parent.
 
@@ -1909,6 +1955,7 @@ def editor(job_id):
 
         # filters applied after optional overlay compositing
         vf_parts = []
+        fonts_dir_esc = FONTS_DIR.replace('\\', '/').replace(':', '\\:')
 
         effective_sub_font = sub_font
         # Use Bold=1 in ASS force_style instead of appending " Bold" to FontName,
@@ -1977,7 +2024,6 @@ def editor(job_id):
                     sub_letter_sp = int(job.get('sub_letter_spacing', 0) or 0)
                     if sub_letter_sp:
                         sub_style += f",Spacing={sub_letter_sp}"
-                fonts_dir_esc = FONTS_DIR.replace('\\', '/').replace(':', '\\:')
                 vf_parts.append(f"subtitles='{ass_abs}':fontsdir='{fonts_dir_esc}':force_style='{sub_style}'")
             else:
                 # Fall back to plain SRT when no ASS file exists
@@ -2010,72 +2056,43 @@ def editor(job_id):
                 vf_parts.append(f"subtitles='{srt_abs}':fontsdir='{fonts_dir_esc}':force_style='{sub_style}'")
 
         if has_title:
-            effective_title_font = title_font
-            if title_bold and not effective_title_font.endswith(' Bold'):
-                effective_title_font = f"{effective_title_font} Bold"
-            font_file = FONT_MAP.get(effective_title_font) or FONT_MAP.get(title_font) or 'C:/Windows/Fonts/arial.ttf'
-            font_esc  = font_file.replace('\\', '/').replace(':', '\\:')
-            tc  = html_to_drawtext_color(title_color)
-            sc  = html_to_drawtext_color(title_stroke)
-            bw  = max(1, int(title_size) // 14)
+            # ── Title via ASS (same pipeline as subtitles) ──────────────
+            # Letter-spacing (ASS Spacing) and line-height are reliable in
+            # libass, unlike drawtext's letter_spacing which many FFmpeg
+            # builds do not support.  Each line gets its own Dialogue
+            # event with \\pos for pixel-precise canvas-style placement.
+            title_ass_name = f"job_{job_id}_title.ass"
+            title_ass_path = os.path.join(DOWNLOADS_DIR, title_ass_name)
+            title_letter_sp = int(job.get('title_letter_spacing', 0) or 0)
             title_line_sp   = int(job.get('title_line_spacing', 0) or 0)
-            title_letter_sp = float(job.get('title_letter_spacing', 0) or 0)
-
-            # Render each line as its own drawtext filter.
-            # FFmpeg y = top of glyph bounding box = title_y stored from canvas drag.
-            # Line step = fontSize*1.2 + userLineSpacing, matching the canvas lh formula.
-            # This avoids FFmpeg `line_spacing` entirely (font-metric-dependent, unreliable).
-            title_lines = title_text.split('\n')
-            # line height: same formula as canvas lh = fontSize*1.2 + userLineSpacing
-            lh = int(int(title_size) * 1.2) + title_line_sp
-
-            for i, line in enumerate(title_lines):
-                if not line:    # blank lines: just advance Y, no filter needed
-                    continue
-                line_y = max(0, int(title_y) + i * lh)
-
-                # ═══ letter‑spacing fallback ══════════════════════════════
-                # When FFmpeg drawtext lacks native letter_spacing support,
-                # render each character individually with precise x‑offsets
-                # so the exported video matches the canvas preview exactly.
-                if title_letter_sp and not drawtext_supports_letter_spacing():
-                    # avg char advance ≈ fontSize * 0.6 for Latin scripts
-                    char_advance = int(int(title_size) * 0.6) + int(title_letter_sp)
-                    for ci, ch in enumerate(line):
-                        ch_txt_name = f"job_{job_id}_title_line{i}_ch{ci}.txt"
-                        ch_txt_path = os.path.join(DOWNLOADS_DIR, ch_txt_name)
-                        with open(ch_txt_path, 'w', encoding='utf-8') as _lf:
-                            _lf.write(ch)
-                        ch_txt_esc = ch_txt_path.replace('\\', '/').replace(':', '\\:')
-                        ch_x = int(title_x) + ci * char_advance
-                        drawtext_opts = (
-                            f"drawtext=fontfile='{font_esc}':textfile='{ch_txt_esc}'"
-                            f":fontsize={title_size}:fontcolor={tc}"
-                            f":x={ch_x}:y={line_y}"
-                            f":box=0:bordercolor={sc}:borderw={bw}"
-                        )
-                        vf_parts.append(drawtext_opts)
-                else:
-                    # Write each line to its own tiny temp file (handles Unicode safely)
-                    line_txt_name = f"job_{job_id}_title_line{i}.txt"
-                    line_txt_path = os.path.join(DOWNLOADS_DIR, line_txt_name)
-                    with open(line_txt_path, 'w', encoding='utf-8') as _lf:
-                        _lf.write(line)
-                    line_txt_esc = line_txt_path.replace('\\', '/').replace(':', '\\:')
-
-                    # FFmpeg drawtext y = top of the glyph ascender = top of the bounding
-                    # box, which is exactly title_y as stored from the canvas drag.
-                    # No ascent offset is needed: the canvas stores titlePos.y as the top
-                    # of the box; FFmpeg y is also the top of the box.
-                    drawtext_opts = (
-                        f"drawtext=fontfile='{font_esc}':textfile='{line_txt_esc}'"
-                        f":fontsize={title_size}:fontcolor={tc}"
-                        f":x={title_x}:y={line_y}"
-                        f":box=0:bordercolor={sc}:borderw={bw}"
-                    )
-                    if title_letter_sp:
-                        drawtext_opts += f":letter_spacing={title_letter_sp}"
-                    vf_parts.append(drawtext_opts)
+            title_to_ass(
+                title_text=title_text,
+                ass_path=title_ass_path,
+                font_name=title_font,
+                font_size=int(title_size),
+                color=title_color,
+                stroke_color=title_stroke,
+                stroke_width=max(1, int(title_size) // 14),
+                bold=title_bold,
+                letter_spacing=title_letter_sp,
+                title_x=int(title_x),
+                title_y=int(title_y),
+                line_spacing=title_line_sp,
+                video_width=vid_w,
+                video_height=vid_h,
+            )
+            title_ass_abs = title_ass_path.replace('\\', '/').replace(':', '\\:')
+            # force_style keeps the ASS file itself minimal; all styling travels here
+            title_style = (
+                f"FontName={title_font},FontSize={title_size},"
+                f"PrimaryColour={html_to_ass_color(title_color)},"
+                f"OutlineColour={html_to_ass_color(title_stroke)},"
+                f"Outline={max(1, int(title_size) // 14)},"
+                f"Bold={1 if title_bold else 0}"
+            )
+            if title_letter_sp:
+                title_style += f",Spacing={title_letter_sp}"
+            vf_parts.append(f"subtitles='{title_ass_abs}':fontsdir='{fonts_dir_esc}':force_style='{title_style}'")
 
         # Always write the filter graph to a script file and use
         # -filter_complex_script so Windows never interprets special characters
@@ -2084,12 +2101,10 @@ def editor(job_id):
         fc_script_path = os.path.join(DOWNLOADS_DIR, fc_script_name)
 
         render_quality = list(VIDEO_QUALITY)
-        gpu_encoder_used = False   # track so we can fall back to CPU on runtime failure
         if gpu_mode == 'auto':
             selected_gpu = select_auto_gpu_encoder()
             if selected_gpu:
                 render_quality = list(GPU_ENCODER_QUALITY[selected_gpu])
-                gpu_encoder_used = True
                 update_job(job_id, log=f"auto GPU mode selected {selected_gpu}")
             else:
                 update_job(job_id, log="auto GPU mode selected but no supported encoder found, using CPU")
@@ -2097,7 +2112,6 @@ def editor(job_id):
         elif gpu_mode in GPU_ENCODER_QUALITY:
             if ffmpeg_supports_encoder(gpu_mode):
                 render_quality = list(GPU_ENCODER_QUALITY[gpu_mode])
-                gpu_encoder_used = True
                 update_job(job_id, log=f"using GPU encoder {gpu_mode}")
             else:
                 update_job(job_id, log=f"GPU encoder {gpu_mode} unavailable, falling back to CPU")
@@ -2115,8 +2129,6 @@ def editor(job_id):
             scale_filter = f"scale={export_res_w}:{export_res_h}:force_original_aspect_ratio=decrease,pad={export_res_w}:{export_res_h}:(ow-iw)/2:(oh-ih)/2"
             vf_parts.insert(0, scale_filter)  # always prepend so it applies first
 
-        # ── build ffmpeg command prefix (everything before the encoder args) ──
-        cmd_suffix = ['-c:a', 'copy', new_video_name]
         if has_overlay:
             ov_scale = f"[1:v]scale={overlay_w}:{overlay_h}[ov]"
             if vf_parts:
@@ -2137,18 +2149,20 @@ def editor(job_id):
                 _fc.write(fc)
             update_job(job_id, log=f"filter_complex (overlay): {fc}")
             if ffmpeg_supports_filter_complex_script():
-                cmd_prefix = [
+                cmd = [
                     'ffmpeg', '-nostdin', '-y',
                     '-i', orig_video, '-i', overlay_path,
                     '-filter_complex_script', fc_script_name,
                     '-map', out_label, '-map', '0:a?',
+                    *render_quality, '-c:a', 'copy', new_video_name,
                 ]
             else:
-                cmd_prefix = [
+                cmd = [
                     'ffmpeg', '-nostdin', '-y',
                     '-i', orig_video, '-i', overlay_path,
                     '-filter_complex', fc,
                     '-map', out_label, '-map', '0:a?',
+                    *render_quality, '-c:a', 'copy', new_video_name,
                 ]
         elif vf_parts:
             vf_chain = ','.join(vf_parts)
@@ -2157,41 +2171,31 @@ def editor(job_id):
                 _fc.write(fc)
             update_job(job_id, log=f"filter_complex (no overlay): {fc}")
             if ffmpeg_supports_filter_complex_script():
-                cmd_prefix = [
+                cmd = [
                     'ffmpeg', '-nostdin', '-y', '-fontsdir', FONTS_DIR,
                     '-i', orig_video,
                     '-filter_complex_script', fc_script_name,
                     '-map', '[vout]', '-map', '0:a?',
+                    *render_quality, '-c:a', 'copy', new_video_name,
                 ]
             else:
-                cmd_prefix = [
+                cmd = [
                     'ffmpeg', '-nostdin', '-y', '-fontsdir', FONTS_DIR,
                     '-i', orig_video,
                     '-filter_complex', fc,
                     '-map', '[vout]', '-map', '0:a?',
+                    *render_quality, '-c:a', 'copy', new_video_name,
                 ]
         else:
-            cmd_prefix = ['ffmpeg', '-nostdin', '-y',
-                          '-i', orig_video]
+            cmd = ['ffmpeg', '-nostdin', '-y',
+                   '-i', orig_video,
+                   *render_quality, '-c:a', 'copy', new_video_name]
 
-        # ── execute (with automatic GPU→CPU fallback) ────────────────────
-        encoders_to_try = [render_quality]
-        if gpu_encoder_used:
-            encoders_to_try.append(list(VIDEO_QUALITY))  # CPU fallback
-
-        result = None
-        for attempt_idx, encoder_params in enumerate(encoders_to_try):
-            cmd = cmd_prefix + encoder_params + cmd_suffix
-            if attempt_idx > 0:
-                update_job(job_id, log=f"GPU encoder failed, retrying with CPU (libx264)")
-            update_job(job_id, log=f"ffmpeg: {' '.join(cmd)}")
-            result = subprocess.run(cmd, cwd=DOWNLOADS_DIR, capture_output=True, text=True,
-                                    encoding='utf-8', errors='replace', env=ffmpeg_env())
-            if result.returncode == 0:
-                break
+        update_job(job_id, log=f"ffmpeg: {' '.join(cmd)}")
+        result = subprocess.run(cmd, cwd=DOWNLOADS_DIR, capture_output=True, text=True,
+                                encoding='utf-8', errors='replace', env=ffmpeg_env())
+        if result.returncode != 0:
             update_job(job_id, log=f"ffmpeg stderr: {result.stderr[-600:]}")
-
-        if result is None or result.returncode != 0:
             flash('Render failed — check server logs for details.', 'danger')
         else:
             # sanity checks: output file should exist and be non-trivial size
