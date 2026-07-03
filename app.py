@@ -941,7 +941,7 @@ def run_subtitles(input_video, output_dir, model="large", max_length=22, job_id=
         for line in proc.stdout:
             update_job(job_id, log=line.rstrip())
 
-        proc.wait(timeout=3600)  # 1 hour max for subtitle generation
+        proc.wait(timeout=600)  # 10-minute timeout for subtitle generation
         if proc.returncode != 0:
             raise RuntimeError(f"subtitle generation failed (see logs); rc={proc.returncode}")
     else:
@@ -952,7 +952,7 @@ def run_subtitles(input_video, output_dir, model="large", max_length=22, job_id=
             text=True,
             encoding='utf-8',
             env=sub_env,
-            timeout=3600
+            timeout=600  # 10-minute timeout for subtitle generation
         )
         if result.returncode != 0:
             raise RuntimeError(f"subtitle generation failed: {result.stderr}")
@@ -1774,6 +1774,12 @@ def editor(job_id):
     job.setdefault('title_bg_enabled', False)
     job.setdefault('title_bg_color', '#000000')
     job.setdefault('title_bg_opacity', '60')
+    job.setdefault('sub_word_spacing', '0')
+    job.setdefault('video_scale', '1.0')
+    job.setdefault('video_pan_x', '0')
+    job.setdefault('video_pan_y', '0')
+    job.setdefault('trim_in_start', '')
+    job.setdefault('trim_in_end', '')
 
     srt_path = os.path.join(DOWNLOADS_DIR, job.get('srt') or '')
     srt_text = ''
@@ -1899,12 +1905,18 @@ def editor(job_id):
         # ── trim / crop / speed / audio controls ─────────────────────────
         trim_start      = request.form.get('trim_start', '').strip()
         trim_end        = request.form.get('trim_end', '').strip()
+        trim_in_start   = request.form.get('trim_in_start', '').strip()
+        trim_in_end     = request.form.get('trim_in_end', '').strip()
         crop_x          = request.form.get('crop_x', '').strip()
         crop_y          = request.form.get('crop_y', '').strip()
         crop_w          = request.form.get('crop_w', '').strip()
         crop_h          = request.form.get('crop_h', '').strip()
         video_speed     = request.form.get('video_speed', '1.0').strip()
+        video_scale     = request.form.get('video_scale', '1.0').strip()
+        video_pan_x     = request.form.get('video_pan_x', '0').strip()
+        video_pan_y     = request.form.get('video_pan_y', '0').strip()
         audio_boost_db  = request.form.get('audio_boost', '0').strip()
+        sub_word_spacing = request.form.get('sub_word_spacing', '0').strip()
         preview_mode    = request.form.get('preview_mode') == '1'
 
         job.update({
@@ -1942,10 +1954,16 @@ def editor(job_id):
             'gpu_mode': gpu_mode,
             'trim_start': trim_start,
             'trim_end': trim_end,
+            'trim_in_start': trim_in_start,
+            'trim_in_end': trim_in_end,
             'crop_x': crop_x, 'crop_y': crop_y,
             'crop_w': crop_w, 'crop_h': crop_h,
             'video_speed': video_speed,
+            'video_scale': video_scale,
+            'video_pan_x': video_pan_x,
+            'video_pan_y': video_pan_y,
             'audio_boost_db': audio_boost_db,
+            'sub_word_spacing': sub_word_spacing,
         })
 
         # ── download or upload fonts ────────────────────────────────────────
@@ -1969,8 +1987,29 @@ def editor(job_id):
 
         # ── handle overlay upload ─────────────────────────────────────────
         overlay_file = request.files.get('overlay')
-        if overlay_file and overlay_file.filename:
+        overlay_clear = request.form.get('overlay_clear') == '1'
+        if overlay_clear:
+            # remove current overlay
+            old_overlay = job.get('overlay')
+            if old_overlay:
+                old_path = os.path.join(DOWNLOADS_DIR, old_overlay)
+                try:
+                    if os.path.exists(old_path):
+                        os.remove(old_path)
+                except Exception:
+                    pass
+            job.pop('overlay', None)
+        elif overlay_file and overlay_file.filename:
             safe_name = os.path.basename(overlay_file.filename)
+            # delete previous overlay file if it exists and is different
+            old_overlay = job.get('overlay')
+            if old_overlay and old_overlay != safe_name:
+                old_path = os.path.join(DOWNLOADS_DIR, old_overlay)
+                try:
+                    if os.path.exists(old_path):
+                        os.remove(old_path)
+                except Exception:
+                    pass
             overlay_file.save(os.path.join(DOWNLOADS_DIR, safe_name))
             job['overlay'] = safe_name
         # If no new file was uploaded but the hidden form field carries an
@@ -1981,6 +2020,9 @@ def editor(job_id):
             overlay_path = resolve_overlay_path(ov_from_field)
             if ov_from_field and overlay_path:
                 job['overlay'] = os.path.basename(ov_from_field)
+            else:
+                # hidden field points to a non-existent file – clear it
+                pass
         overlay_filename = job.get('overlay')
 
         # when saving settings without running ffmpeg we still need to persist
@@ -2036,6 +2078,8 @@ def editor(job_id):
         # Validate and parse trim times (in seconds or HH:MM:SS)
         trim_start_sec = None
         trim_end_sec = None
+        trim_in_start_sec = None
+        trim_in_end_sec = None
         try:
             if trim_start:
                 trim_start_sec = _time_to_seconds(trim_start)
@@ -2046,6 +2090,32 @@ def editor(job_id):
                 trim_end_sec = _time_to_seconds(trim_end)
         except (ValueError, TypeError):
             update_job(job_id, log=f"warning: invalid trim_end '{trim_end}', ignoring")
+        try:
+            if trim_in_start:
+                trim_in_start_sec = _time_to_seconds(trim_in_start)
+        except (ValueError, TypeError):
+            update_job(job_id, log=f"warning: invalid trim_in_start '{trim_in_start}', ignoring")
+        try:
+            if trim_in_end:
+                trim_in_end_sec = _time_to_seconds(trim_in_end)
+        except (ValueError, TypeError):
+            update_job(job_id, log=f"warning: invalid trim_in_end '{trim_in_end}', ignoring")
+
+        # ── Video transform (scale + pan) for landscape adjustment ─────
+        try:
+            vs = float(video_scale)
+            vpx = float(video_pan_x)
+            vpy = float(video_pan_y)
+            if vs != 1.0 or vpx != 0 or vpy != 0:
+                vs = max(0.1, min(10.0, vs))
+                # scale first, then translate; use iw/ih to compute centering offset
+                pre_filters.append(
+                    f"scale=iw*{vs:.4f}:ih*{vs:.4f}:flags=lanczos,"
+                    f"crop={vid_w}:{vid_h}:({vs:.4f}*iw-{vid_w})/2+{vpx:.1f}:({vs:.4f}*ih-{vid_h})/2+{vpy:.1f}"
+                )
+                update_job(job_id, log=f"video transform: scale={vs:.2f} pan=({vpx:.0f},{vpy:.0f})")
+        except (ValueError, TypeError):
+            pass
 
         # Crop filter (x:y:w:h)
         if all(v for v in [crop_x, crop_y, crop_w, crop_h]):
@@ -2298,21 +2368,65 @@ def editor(job_id):
             scale_filter = f"scale={export_res_w}:{export_res_h}:force_original_aspect_ratio=decrease,pad={export_res_w}:{export_res_h}:(ow-iw)/2:(oh-ih)/2"
             vf_parts.insert(0, scale_filter)  # always prepend so it applies first
 
+        # ── Build mid-video trim filter if specified ─────────────────────
+        # If trim_in_start and trim_in_end are set, we cut out that middle
+        # segment by splitting into two parts and concatenating them.
+        has_mid_cut = (trim_in_start_sec is not None and trim_in_end_sec is not None
+                       and trim_in_end_sec > trim_in_start_sec)
+        mid_cut_video_prefix = ""
+        mid_cut_video_suffix = ""
+        mid_cut_audio_prefix = ""
+        mid_cut_audio_suffix = ""
+        mid_cut_input_label = "[0:v]"
+
+        if has_mid_cut:
+            its = trim_in_start_sec
+            ite = trim_in_end_sec
+            mid_cut_video_prefix = (
+                f"[0:v]trim=0:{its:.3f},setpts=PTS-STARTPTS[vca];"
+                f"[0:v]trim={ite:.3f},setpts=PTS-STARTPTS[vcb];"
+                f"[vca][vcb]concat=n=2:v=1:a=0"
+            )
+            mid_cut_video_suffix = ""
+            mid_cut_audio_prefix = (
+                f"[0:a]atrim=0:{its:.3f},asetpts=PTS-STARTPTS[aca];"
+                f"[0:a]atrim={ite:.3f},asetpts=PTS-STARTPTS[acb];"
+                f"[aca][acb]concat=n=2:v=0:a=1"
+            )
+            mid_cut_audio_suffix = ""
+            mid_cut_input_label = "[vcut]"
+            update_job(job_id, log=f"mid-video cut: remove {its:.1f}s–{ite:.1f}s")
+
         if has_overlay:
             ov_scale = f"[1:v]scale={overlay_w}:{overlay_h}[ov]"
             if vf_parts:
                 vf_chain = ','.join(vf_parts)
-                fc = (
-                    f"{ov_scale};"
-                    f"[0:v][ov]overlay={overlay_x}:{overlay_y}[ovout];"
-                    f"[ovout]{vf_chain}[final]"
-                )
+                if has_mid_cut:
+                    fc = (
+                        f"{mid_cut_video_prefix}[vcut];"
+                        f"{ov_scale};"
+                        f"[vcut][ov]overlay={overlay_x}:{overlay_y}[ovout];"
+                        f"[ovout]{vf_chain}[final]"
+                    )
+                else:
+                    fc = (
+                        f"{ov_scale};"
+                        f"[0:v][ov]overlay={overlay_x}:{overlay_y}[ovout];"
+                        f"[ovout]{vf_chain}[final]"
+                    )
                 out_label = '[final]'
             else:
-                fc = (
-                    f"{ov_scale};"
-                    f"[0:v][ov]overlay={overlay_x}:{overlay_y}[vout]"
-                )
+                if has_mid_cut:
+                    fc = (
+                        f"{mid_cut_video_prefix}[vcut];"
+                        f"{ov_scale};"
+                        f"[vcut][ov]overlay={overlay_x}:{overlay_y}[vout]"
+                    )
+                else:
+                    fc = (
+                        f"{ov_scale};"
+                        f"[0:v][ov]overlay={overlay_x}:{overlay_y}[vout]"
+                    )
                 out_label = '[vout]'
             with open(fc_script_path, 'w', encoding='utf-8') as _fc:
                 _fc.write(fc)
@@ -2328,23 +2442,34 @@ def editor(job_id):
             else:
                 cmd.extend(['-filter_complex', fc])
             cmd.extend(['-map', out_label, '-map', '0:a?'])
-            # Trim end
-            if trim_end_sec is not None and trim_start_sec is not None:
-                dur = trim_end_sec - trim_start_sec
-                if dur > 0:
-                    cmd.extend(['-t', f'{dur:.3f}'])
-            elif trim_end_sec is not None:
-                cmd.extend(['-to', f'{trim_end_sec:.3f}'])
-            # Audio filters
-            if audio_filters:
-                af_chain = ','.join(audio_filters)
+            # Trim end (only if no mid-cut; mid-cut handles its own timing)
+            if not has_mid_cut:
+                if trim_end_sec is not None and trim_start_sec is not None:
+                    dur = trim_end_sec - trim_start_sec
+                    if dur > 0:
+                        cmd.extend(['-t', f'{dur:.3f}'])
+                elif trim_end_sec is not None:
+                    cmd.extend(['-to', f'{trim_end_sec:.3f}'])
+            # Audio filters (including mid-cut audio)
+            all_audio_filters = list(audio_filters)
+            if has_mid_cut:
+                # mid-cut audio is handled via filter_complex, not -af
+                pass
+            if all_audio_filters:
+                af_chain = ','.join(all_audio_filters)
                 cmd.extend(['-af', af_chain])
             cmd.extend(render_quality)
             cmd.extend(['-c:a', 'aac', '-b:a', '192k', new_video_name])
-        elif vf_parts or audio_filters:
+        elif vf_parts or audio_filters or has_mid_cut:
             if vf_parts:
                 vf_chain = ','.join(vf_parts)
-                fc = f"[0:v]{vf_chain}[vout]"
+                if has_mid_cut:
+                    fc = f"{mid_cut_video_prefix}[vcut];[vcut]{vf_chain}[vout]"
+                else:
+                    fc = f"[0:v]{vf_chain}[vout]"
+                out_label = '[vout]'
+            elif has_mid_cut:
+                fc = f"{mid_cut_video_prefix}[vout]"
                 out_label = '[vout]'
             else:
                 # Only audio filters, pass video through
@@ -2365,15 +2490,17 @@ def editor(job_id):
                 cmd.extend(['-filter_complex', fc])
             cmd.extend(['-map', out_label, '-map', '0:a?'])
             # Trim end
-            if trim_end_sec is not None and trim_start_sec is not None:
-                dur = trim_end_sec - trim_start_sec
-                if dur > 0:
-                    cmd.extend(['-t', f'{dur:.3f}'])
-            elif trim_end_sec is not None:
-                cmd.extend(['-to', f'{trim_end_sec:.3f}'])
+            if not has_mid_cut:
+                if trim_end_sec is not None and trim_start_sec is not None:
+                    dur = trim_end_sec - trim_start_sec
+                    if dur > 0:
+                        cmd.extend(['-t', f'{dur:.3f}'])
+                elif trim_end_sec is not None:
+                    cmd.extend(['-to', f'{trim_end_sec:.3f}'])
             # Audio filters
-            if audio_filters:
-                af_chain = ','.join(audio_filters)
+            all_audio_filters2 = list(audio_filters)
+            if all_audio_filters2:
+                af_chain = ','.join(all_audio_filters2)
                 cmd.extend(['-af', af_chain])
             cmd.extend(render_quality)
             cmd.extend(['-c:a', 'aac', '-b:a', '192k', new_video_name])
@@ -2382,12 +2509,25 @@ def editor(job_id):
             if trim_start_sec is not None:
                 cmd.extend(['-ss', f'{trim_start_sec:.3f}'])
             cmd.extend(['-i', orig_video])
-            if trim_end_sec is not None and trim_start_sec is not None:
-                dur = trim_end_sec - trim_start_sec
-                if dur > 0:
-                    cmd.extend(['-t', f'{dur:.3f}'])
-            elif trim_end_sec is not None:
-                cmd.extend(['-to', f'{trim_end_sec:.3f}'])
+            if has_mid_cut:
+                # Use filter_complex for mid-cut even without other filters
+                fc = f"{mid_cut_video_prefix}[vout]"
+                out_label = '[vout]'
+                with open(fc_script_path, 'w', encoding='utf-8') as _fc:
+                    _fc.write(fc)
+                use_fc_script = ffmpeg_supports_filter_complex_script()
+                if use_fc_script:
+                    cmd.extend(['-filter_complex_script', fc_script_name])
+                else:
+                    cmd.extend(['-filter_complex', fc])
+                cmd.extend(['-map', out_label, '-map', '0:a?'])
+            else:
+                if trim_end_sec is not None and trim_start_sec is not None:
+                    dur = trim_end_sec - trim_start_sec
+                    if dur > 0:
+                        cmd.extend(['-t', f'{dur:.3f}'])
+                elif trim_end_sec is not None:
+                    cmd.extend(['-to', f'{trim_end_sec:.3f}'])
             if audio_filters:
                 af_chain = ','.join(audio_filters)
                 cmd.extend(['-af', af_chain])
