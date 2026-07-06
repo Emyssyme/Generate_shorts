@@ -1124,6 +1124,10 @@ def background_pipeline(job_id, url=None, upload_path=None, start_time="0", end_
             update_job(job_id, status="unsilencing", log="calling unsilence script")
             unsilenced = os.path.join(DOWNLOADS_DIR, f"job_{job_id}_unsilenced.mp4")
             run_unsilence(cut_path, unsilenced, job_id=job_id)
+            # verify unsilence actually produced a file
+            if not os.path.exists(unsilenced) or os.path.getsize(unsilenced) < 1000:
+                update_job(job_id, log="warning: unsilence output missing or too small, falling back to original")
+                unsilenced = cut_path
 
         if skip_cropping:
             update_job(job_id, status="skipping cropping", log="user requested no face cropping")
@@ -1136,7 +1140,8 @@ def background_pipeline(job_id, url=None, upload_path=None, start_time="0", end_
             update_job(job_id, status="skipping subtitles", log="user requested no automatic subtitles")
             srtfile, assfile = None, None
         else:
-            update_job(job_id, status="subtitling", log=f"generating subtitles (method={subtitle_method})")
+            update_job(job_id, status="subtitling",
+                       log=f"generating subtitles on: {os.path.basename(cropped)} (method={subtitle_method})")
             srtfile, assfile = run_subtitles(cropped, DOWNLOADS_DIR, job_id=job_id, method=subtitle_method, gemini_user_key=gemini_user_key)
 
             # sanity check: ensure subtitles were actually written
@@ -1147,7 +1152,7 @@ def background_pipeline(job_id, url=None, upload_path=None, start_time="0", end_
                    video=os.path.basename(cropped),
                    srt=os.path.basename(srtfile) if srtfile else None,
                    ass=os.path.basename(assfile) if (assfile and os.path.exists(assfile)) else None,
-                   log="all steps finished")
+                   log=f"done: video={os.path.basename(cropped)} srt={os.path.basename(srtfile) if srtfile else 'none'} (pipeline: cut→{'unsilenced→' if not skip_unsilence else ''}{'cropped→' if not skip_cropping else ''}subtitles)")
         # cache this result for future identical requests
         if url:
             store_cache(url, start_time, end_time,
@@ -1780,10 +1785,13 @@ def editor(job_id):
     job.setdefault('video_pan_y', '0')
     job.setdefault('trim_in_start', '')
     job.setdefault('trim_in_end', '')
+    job.setdefault('project_res', 'source')
+    job.setdefault('project_w', '')
+    job.setdefault('project_h', '')
 
     srt_path = os.path.join(DOWNLOADS_DIR, job.get('srt') or '')
     srt_text = ''
-    if os.path.exists(srt_path):
+    if job.get('srt') and os.path.isfile(srt_path):
         with open(srt_path, encoding='utf-8') as f:
             # normalize line endings and collapse excessive blank lines
             raw = f.read()
@@ -1897,11 +1905,12 @@ def editor(job_id):
         except: sub_line_sp = '0'
         try:    sub_letter_sp = str(float(request.form.get('sub_letter_spacing', '0')))
         except: sub_letter_sp = '0'
-        # ── advanced export controls ──────────────────────────────────────
+        # ── project resolution & export controls ──────────────────────────
+        project_res     = request.form.get('project_res', 'source').strip()
+        project_w       = request.form.get('project_w', '').strip()
+        project_h       = request.form.get('project_h', '').strip()
         export_fps      = request.form.get('export_fps', '').strip()
         export_bitrate  = request.form.get('export_bitrate', '').strip()
-        export_res_w    = request.form.get('export_res_w', '').strip()
-        export_res_h    = request.form.get('export_res_h', '').strip()
         # ── trim / crop / speed / audio controls ─────────────────────────
         trim_start      = request.form.get('trim_start', '').strip()
         trim_end        = request.form.get('trim_end', '').strip()
@@ -1947,10 +1956,11 @@ def editor(job_id):
             'title_letter_spacing': title_letter_sp,
             'sub_line_spacing': sub_line_sp,
             'sub_letter_spacing': sub_letter_sp,
+            'project_res': project_res,
+            'project_w': project_w,
+            'project_h': project_h,
             'export_fps': export_fps,
             'export_bitrate': export_bitrate,
-            'export_res_w': export_res_w,
-            'export_res_h': export_res_h,
             'gpu_mode': gpu_mode,
             'trim_start': trim_start,
             'trim_end': trim_end,
@@ -2042,34 +2052,12 @@ def editor(job_id):
         has_overlay = bool(overlay_path)
         has_title   = bool(title_text)
 
-        # before we build filters, scale coords/sizes if preview dimensions are
-        # provided and differ from the actual video size.  preview width/height
-        # may be filled by client JS when the metadata loads; if empty we skip.
+        # Canvas preview dimensions are set to the target resolution by JS.
+        # Overlay/title/subtitle positions are in target-space coordinates.
+        # The ffmpeg filter chain applies overlay after the video transform,
+        # so these coordinates match without any scaling.  We still fetch the
+        # source video size for the transform calculations below.
         vid_w, vid_h = get_video_size(os.path.join(DOWNLOADS_DIR, orig_video))
-        try:
-            prev_w = float(job.get('preview_w') or prev_w)
-            prev_h = float(job.get('preview_h') or prev_h)
-        except Exception:
-            prev_w = prev_h = 0
-        if prev_w > 0 and prev_h > 0 and (prev_w != vid_w or prev_h != vid_h):
-            sx = vid_w / prev_w
-            sy = vid_h / prev_h
-            # scale each numeric field appropriately
-            overlay_x = str(int(float(overlay_x) * sx))
-            overlay_y = str(int(float(overlay_y) * sy))
-            overlay_w = str(int(float(overlay_w) * sx))
-            overlay_h = str(int(float(overlay_h) * sy))
-            title_x   = str(int(float(title_x)   * sx))
-            title_y   = str(int(float(title_y)   * sy))
-            sub_y     = str(int(float(sub_y)     * sy))
-            # persist scaled values so future edits use the same coordinate system
-            job.update({
-                'overlay_x': overlay_x, 'overlay_y': overlay_y,
-                'overlay_w': overlay_w, 'overlay_h': overlay_h,
-                'title_x': title_x, 'title_y': title_y, 'sub_y': sub_y,
-                'preview_w': vid_w, 'preview_h': vid_h,
-            })
-            update_job(job_id, log=f"scaling coords from preview {prev_w}x{prev_h}→{vid_w}x{vid_h}")
 
         # ── trim / crop / speed / audio pre-filters ─────────────────────
         pre_filters = []
@@ -2101,21 +2089,76 @@ def editor(job_id):
         except (ValueError, TypeError):
             update_job(job_id, log=f"warning: invalid trim_in_end '{trim_in_end}', ignoring")
 
-        # ── Video transform (scale + pan) for landscape adjustment ─────
+        # ── Video transform (scale + pan) for landscape/portrait adjustment ─
+        RESOLUTION_PRESETS = {
+            'source': None,
+            '1080x1920': (1080, 1920),
+            '1920x1080': (1920, 1080),
+            '1080x1080': (1080, 1080),
+            '1280x720':  (1280, 720),
+            '720x1280':  (720, 1280),
+        }
+
+        # Determine target resolution
+        target_w, target_h = vid_w, vid_h  # default: keep source resolution
         try:
-            vs = float(video_scale)
-            vpx = float(video_pan_x)
-            vpy = float(video_pan_y)
-            if vs != 1.0 or vpx != 0 or vpy != 0:
-                vs = max(0.1, min(10.0, vs))
-                # scale first, then translate; use iw/ih to compute centering offset
-                pre_filters.append(
-                    f"scale=iw*{vs:.4f}:ih*{vs:.4f}:flags=lanczos,"
-                    f"crop={vid_w}:{vid_h}:({vs:.4f}*iw-{vid_w})/2+{vpx:.1f}:({vs:.4f}*ih-{vid_h})/2+{vpy:.1f}"
-                )
-                update_job(job_id, log=f"video transform: scale={vs:.2f} pan=({vpx:.0f},{vpy:.0f})")
+            pw = int(float(project_w)) if project_w else 0
+            ph = int(float(project_h)) if project_h else 0
+            if project_res == 'custom' and pw > 0 and ph > 0:
+                target_w, target_h = pw, ph
+            elif project_res in RESOLUTION_PRESETS and RESOLUTION_PRESETS[project_res] is not None:
+                target_w, target_h = RESOLUTION_PRESETS[project_res]
         except (ValueError, TypeError):
             pass
+
+        # If target differs from source, build a cover-scale → zoom → pan → crop chain
+        if (target_w, target_h) != (vid_w, vid_h):
+            try:
+                vs = max(0.1, min(10.0, float(video_scale)))
+                vpx = float(video_pan_x)
+                vpy = float(video_pan_y)
+            except (ValueError, TypeError):
+                vs, vpx, vpy = 1.0, 0, 0
+
+            # Cover-scale: scale source so it fully covers the target frame
+            fill_w = target_w / vid_w
+            fill_h = target_h / vid_h
+            base_scale = max(fill_w, fill_h)  # cover behavior – use the larger dimension
+            total_scale = base_scale * vs
+
+            scaled_w = vid_w * total_scale
+            scaled_h = vid_h * total_scale
+
+            # Center crop offset (default: center the source in the target frame)
+            center_x = (scaled_w - target_w) / 2
+            center_y = (scaled_h - target_h) / 2
+            crop_x_val = max(0, center_x + vpx)
+            crop_y_val = max(0, center_y + vpy)
+
+            pre_filters.append(
+                f"scale=iw*{total_scale:.4f}:ih*{total_scale:.4f}:flags=lanczos,"
+                f"crop={target_w}:{target_h}:{crop_x_val:.1f}:{crop_y_val:.1f}"
+            )
+            update_job(job_id,
+                log=f"project: {vid_w}x{vid_h}→{target_w}x{target_h} "
+                    f"(cover×{base_scale:.2f}, zoom×{vs:.2f}, pan=({vpx:.0f},{vpy:.0f}))")
+
+            # Update resolution for all subsequent filters (ASS, drawtext, etc.)
+            vid_w, vid_h = target_w, target_h
+        else:
+            # Same resolution – zoom/pan still work but crop to source dims
+            try:
+                vs = max(0.1, min(10.0, float(video_scale)))
+                vpx = float(video_pan_x)
+                vpy = float(video_pan_y)
+                if vs != 1.0 or vpx != 0 or vpy != 0:
+                    pre_filters.append(
+                        f"scale=iw*{vs:.4f}:ih*{vs:.4f}:flags=lanczos,"
+                        f"crop={vid_w}:{vid_h}:({vs:.4f}*iw-{vid_w})/2+{vpx:.1f}:({vs:.4f}*ih-{vid_h})/2+{vpy:.1f}"
+                    )
+                    update_job(job_id, log=f"video transform: scale={vs:.2f} pan=({vpx:.0f},{vpy:.0f})")
+            except (ValueError, TypeError):
+                pass
 
         # Crop filter (x:y:w:h)
         if all(v for v in [crop_x, crop_y, crop_w, crop_h]):
@@ -2159,8 +2202,9 @@ def editor(job_id):
         except (ValueError, TypeError):
             pass
 
-        # filters applied after optional overlay compositing
+        # filters: video transforms first, then subtitles/titles after overlay
         vf_parts = list(pre_filters)  # pre_filters go first
+        n_video_filters = len(vf_parts)  # split-point: overlay goes between these and subtitle/title
         fonts_dir_esc = FONTS_DIR.replace('\\', '/').replace(':', '\\:')
 
         # Use base font family + Bold=1 flag.  fontconfig resolves bold by weight.
@@ -2358,15 +2402,10 @@ def editor(job_id):
         # ── apply user export overrides ──────────────────────────────────
         export_fps = job.get('export_fps', '').strip()
         export_bitrate = job.get('export_bitrate', '').strip()
-        export_res_w = job.get('export_res_w', '').strip()
-        export_res_h = job.get('export_res_h', '').strip()
         if export_fps:
             render_quality.insert(0, '-r'); render_quality.insert(1, export_fps)
         if export_bitrate:
             render_quality.insert(0, '-b:v'); render_quality.insert(1, export_bitrate)
-        if export_res_w and export_res_h:
-            scale_filter = f"scale={export_res_w}:{export_res_h}:force_original_aspect_ratio=decrease,pad={export_res_w}:{export_res_h}:(ow-iw)/2:(oh-ih)/2"
-            vf_parts.insert(0, scale_filter)  # always prepend so it applies first
 
         # ── Build mid-video trim filter if specified ─────────────────────
         # If trim_in_start and trim_in_end are set, we cut out that middle
@@ -2399,38 +2438,30 @@ def editor(job_id):
 
         if has_overlay:
             ov_scale = f"[1:v]scale={overlay_w}:{overlay_h}[ov]"
-            if vf_parts:
-                vf_chain = ','.join(vf_parts)
-                if has_mid_cut:
-                    fc = (
-                        f"{mid_cut_video_prefix}[vcut];"
-                        f"{ov_scale};"
-                        f"[vcut][ov]overlay={overlay_x}:{overlay_y}[ovout];"
-                        f"[ovout]{vf_chain}[final]"
-                    )
-                else:
-                    fc = (
-                        f"{ov_scale};"
-                        f"[0:v][ov]overlay={overlay_x}:{overlay_y}[ovout];"
-                        f"[ovout]{vf_chain}[final]"
-                    )
-                out_label = '[final]'
+            video_filters = vf_parts[:n_video_filters]
+            post_filters = vf_parts[n_video_filters:]
+            pre_chain = ','.join(video_filters) if video_filters else 'null'
+            post_chain = ','.join(post_filters) if post_filters else 'null'
+
+            if has_mid_cut:
+                fc = (
+                    f"{mid_cut_video_prefix}[vcut];"
+                    f"[vcut]{pre_chain}[vpre];"
+                    f"{ov_scale};"
+                    f"[vpre][ov]overlay={overlay_x}:{overlay_y}[ovout];"
+                    f"[ovout]{post_chain}[final]"
+                )
             else:
-                if has_mid_cut:
-                    fc = (
-                        f"{mid_cut_video_prefix}[vcut];"
-                        f"{ov_scale};"
-                        f"[vcut][ov]overlay={overlay_x}:{overlay_y}[vout]"
-                    )
-                else:
-                    fc = (
-                        f"{ov_scale};"
-                        f"[0:v][ov]overlay={overlay_x}:{overlay_y}[vout]"
-                    )
-                out_label = '[vout]'
+                fc = (
+                    f"[0:v]{pre_chain}[vpre];"
+                    f"{ov_scale};"
+                    f"[vpre][ov]overlay={overlay_x}:{overlay_y}[ovout];"
+                    f"[ovout]{post_chain}[final]"
+                )
+            out_label = '[final]'
             with open(fc_script_path, 'w', encoding='utf-8') as _fc:
                 _fc.write(fc)
-            update_job(job_id, log=f"filter_complex (overlay): {fc}")
+            update_job(job_id, log=f"filter_complex (overlay after transform): {fc}")
             use_fc_script = ffmpeg_supports_filter_complex_script()
             cmd = ['ffmpeg', '-nostdin', '-y']
             # Trim: -ss before -i for fast seeking

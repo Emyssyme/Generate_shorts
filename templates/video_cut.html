@@ -109,10 +109,10 @@
                 document.getElementById('status-' + jobId).style.background = 'var(--accent2)';
                 document.getElementById('card-' + jobId).style.borderColor = 'var(--accent2)';
                 document.getElementById('spinner-' + jobId).remove();
-                let links = `<a href='/download/${data.video}' class='btn btn-sm' style='background:var(--accent2);color:#fff;'>Download</a>`;
+                let links = `<a href='/editor/${jobId}' class='btn btn-sm btn-primary'>Edit</a>`;
+                links += ` <a href='/download/${data.video}' class='btn btn-sm' style='background:var(--accent2);color:#fff;'>Download</a>`;
                 if (data.srt) {
-                    links += `<a href='/download/${data.srt}' class='btn btn-sm btn-outline-secondary'>SRT</a>`;
-                    links += `<a href='/editor/${jobId}' class='btn btn-sm btn-primary'>Edit</a>`;
+                    links += ` <a href='/download/${data.srt}' class='btn btn-sm btn-outline-secondary'>SRT</a>`;
                 }
                 document.getElementById('links-' + jobId).innerHTML = links;
             }

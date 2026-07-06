@@ -157,7 +157,9 @@
       <div class="position-relative mb-2">
         <div class="position-absolute top-0 start-0 m-2" style="z-index:10;">
           <div class="btn-group btn-group-sm layer-btn-group" role="group">
-            <input type="radio" class="btn-check" name="layer" id="layerOverlay" autocomplete="off" checked>
+            <input type="radio" class="btn-check" name="layer" id="layerVideo" autocomplete="off" checked>
+            <label class="btn" for="layerVideo"><i class="bi bi-film"></i> Video</label>
+            <input type="radio" class="btn-check" name="layer" id="layerOverlay" autocomplete="off">
             <label class="btn" for="layerOverlay"><i class="bi bi-image"></i> Logo</label>
             <input type="radio" class="btn-check" name="layer" id="layerTitle" autocomplete="off">
             <label class="btn" for="layerTitle"><i class="bi bi-fonts"></i> Title</label>
@@ -340,14 +342,7 @@
               <input type="number" name="title_letter_spacing" id="titleLetterSpacing" class="form-control form-control-sm"
                      value="{{ job.title_letter_spacing or 0 }}" min="-5" max="50" step="0.5">
             </div>
-            <div style="flex:1;min-width:80px;"><label>GPU</label>
-              <select name="gpu_mode_ui" id="gpuModeUI" class="form-select form-select-sm" onchange="document.getElementById('gpuMode').value=this.value">
-                <option value="auto" {% if job.gpu_mode=='auto' %}selected{% endif %}>Auto</option>
-                <option value="cpu" {% if job.gpu_mode!='h264_nvenc' and job.gpu_mode!='hevc_nvenc' and job.gpu_mode!='auto' %}selected{% endif %}>CPU</option>
-                <option value="h264_nvenc" {% if job.gpu_mode=='h264_nvenc' %}selected{% endif %}>NVENC</option>
-                <option value="hevc_nvenc" {% if job.gpu_mode=='hevc_nvenc' %}selected{% endif %}>HEVC</option>
-              </select>
-            </div>
+            <div style="flex:1;min-width:80px;"></div>
           </div>
           <div class="ctrl-row">
             <div style="width:52px;"><label>Out px</label>
@@ -440,7 +435,7 @@
               <i class="bi bi-scissors"></i> Cut segment
             </button>
           </div>
-          <!-- Video transform (landscape adjustment) -->
+          <!-- Video transform (landscape → vertical etc.) -->
           <div class="ctrl-row">
             <div style="width:62px;"><label>Zoom</label>
               <input type="number" name="video_scale" id="videoScale" class="form-control form-control-sm"
@@ -448,15 +443,16 @@
             </div>
             <div style="width:62px;"><label>Pan X</label>
               <input type="number" name="video_pan_x" id="videoPanX" class="form-control form-control-sm"
-                     value="{{ job.video_pan_x or '0' }}" min="-2000" max="2000" step="1" placeholder="0">
+                     value="{{ job.video_pan_x or '0' }}" min="-4000" max="4000" step="1" placeholder="0">
             </div>
             <div style="width:62px;"><label>Pan Y</label>
               <input type="number" name="video_pan_y" id="videoPanY" class="form-control form-control-sm"
-                     value="{{ job.video_pan_y or '0' }}" min="-2000" max="2000" step="1" placeholder="0">
+                     value="{{ job.video_pan_y or '0' }}" min="-4000" max="4000" step="1" placeholder="0">
             </div>
             <button type="button" id="resetTransformBtn" class="btn btn-sm btn-outline-secondary" title="Reset zoom & pan">
               <i class="bi bi-arrow-counterclockwise"></i>
             </button>
+            <span id="transformInfo" class="small text-muted" style="font-size:0.6rem;"></span>
           </div>
           <!-- Crop -->
           <div class="ctrl-row">
@@ -498,17 +494,38 @@
             </div>
           </div>
           <small class="text-muted" style="font-size:0.65rem;">
-            Trim: enter seconds or HH:MM:SS. Speed: 0.5=half, 2.0=double. Cut segment removes middle part. Zoom/Pan for landscape adjustment. Crop fields are in pixels.
+            Trim: enter seconds or HH:MM:SS. Speed: 0.5=half, 2.0=double. Cut segment removes middle part. Select "Video" layer to drag/scroll on canvas. Crop fields are in pixels.
           </small>
         </div>
       </div>
 
-      <!-- ADVANCED EXPORT -->
+      <!-- PROJECT SETTINGS (resolution & export) -->
       <div class="ctrl-section">
-        <div class="section-header collapsed" onclick="this.classList.toggle('collapsed'); this.nextElementSibling.classList.toggle('d-none')">
-          <i class="bi bi-gear"></i> Advanced Export <i class="bi bi-chevron-down collapse-icon ms-auto"></i>
+        <div class="section-header" onclick="this.classList.toggle('collapsed'); this.nextElementSibling.classList.toggle('d-none')">
+          <i class="bi bi-aspect-ratio"></i> Project Settings <span id="projectResLabel" class="badge ms-2" style="font-size:0.6rem;background:var(--accent);"></span> <i class="bi bi-chevron-down collapse-icon ms-auto"></i>
         </div>
-        <div class="section-body d-none">
+        <div class="section-body">
+          <div class="ctrl-row">
+            <div style="flex:1;min-width:140px;"><label>Resolution</label>
+              <select name="project_res" id="projectRes" class="form-select form-select-sm">
+                <option value="source" {% if job.project_res=='source' %}selected{% endif %}>Source (no change)</option>
+                <option value="1080x1920" {% if job.project_res=='1080x1920' %}selected{% endif %}>1080×1920 — 9:16 Vertical/Shorts</option>
+                <option value="1920x1080" {% if job.project_res=='1920x1080' %}selected{% endif %}>1920×1080 — 16:9 Horizontal</option>
+                <option value="1080x1080" {% if job.project_res=='1080x1080' %}selected{% endif %}>1080×1080 — 1:1 Square</option>
+                <option value="1280x720" {% if job.project_res=='1280x720' %}selected{% endif %}>1280×720 — 16:9 HD</option>
+                <option value="720x1280" {% if job.project_res=='720x1280' %}selected{% endif %}>720×1280 — 9:16 HD</option>
+                <option value="custom" {% if job.project_res=='custom' %}selected{% endif %}>Custom…</option>
+              </select>
+            </div>
+            <div style="width:68px;" id="customResWGrp"><label>Width</label>
+              <input type="number" name="project_w" id="projectW" class="form-control form-control-sm"
+                     value="{{ job.project_w or '' }}" placeholder="auto" min="1" step="2">
+            </div>
+            <div style="width:68px;" id="customResHGrp"><label>Height</label>
+              <input type="number" name="project_h" id="projectH" class="form-control form-control-sm"
+                     value="{{ job.project_h or '' }}" placeholder="auto" min="1" step="2">
+            </div>
+          </div>
           <div class="ctrl-row">
             <div style="width:72px;"><label>FPS</label>
               <input type="number" name="export_fps" id="exportFps" class="form-control form-control-sm"
@@ -518,16 +535,18 @@
               <input type="text" name="export_bitrate" id="exportBitrate" class="form-control form-control-sm"
                      value="{{ job.export_bitrate or '' }}" placeholder="auto (e.g. 8M, 5000k)">
             </div>
-            <div style="width:68px;"><label>Res W</label>
-              <input type="number" name="export_res_w" id="exportResW" class="form-control form-control-sm"
-                     value="{{ job.export_res_w or '' }}" placeholder="auto" min="1" step="2">
-            </div>
-            <div style="width:68px;"><label>Res H</label>
-              <input type="number" name="export_res_h" id="exportResH" class="form-control form-control-sm"
-                     value="{{ job.export_res_h or '' }}" placeholder="auto" min="1" step="2">
+            <div style="flex:1;min-width:140px;" id="gpuGrp"><label>GPU</label>
+              <select name="gpu_mode_ui" id="gpuModeUI" class="form-select form-select-sm" onchange="document.getElementById('gpuMode').value=this.value">
+                <option value="auto" {% if job.gpu_mode=='auto' %}selected{% endif %}>Auto</option>
+                <option value="cpu" {% if job.gpu_mode!='h264_nvenc' and job.gpu_mode!='hevc_nvenc' and job.gpu_mode!='h264_qsv' and job.gpu_mode!='hevc_qsv' and job.gpu_mode!='auto' %}selected{% endif %}>CPU</option>
+                <option value="h264_nvenc" {% if job.gpu_mode=='h264_nvenc' %}selected{% endif %}>NVENC</option>
+                <option value="hevc_nvenc" {% if job.gpu_mode=='hevc_nvenc' %}selected{% endif %}>HEVC</option>
+                <option value="h264_qsv" {% if job.gpu_mode=='h264_qsv' %}selected{% endif %}>QSV</option>
+                <option value="hevc_qsv" {% if job.gpu_mode=='hevc_qsv' %}selected{% endif %}>QSV HEVC</option>
+              </select>
             </div>
           </div>
-          <small class="text-muted" style="font-size:0.65rem;">Leave empty for defaults. Bitrate accepts values like "8M" or "5000k". Resolution will pad to fit.</small>
+          <small class="text-muted" style="font-size:0.65rem;">Resolution changes how the source is fitted — zoom/pan adjusts the crop within the target frame.</small>
         </div>
       </div>
 
@@ -602,8 +621,9 @@ function collectConfig() {
     overlay:            document.getElementById('currentOverlayFile').value,
     export_fps:         document.getElementById('exportFps')?.value || '',
     export_bitrate:     document.getElementById('exportBitrate')?.value || '',
-    export_res_w:       document.getElementById('exportResW')?.value || '',
-    export_res_h:       document.getElementById('exportResH')?.value || '',
+    project_res:        document.getElementById('projectRes')?.value || 'source',
+    project_w:          document.getElementById('projectW')?.value || '',
+    project_h:          document.getElementById('projectH')?.value || '',
     trim_start:         document.getElementById('trimStart')?.value || '',
     trim_end:           document.getElementById('trimEnd')?.value || '',
     trim_in_start:      document.getElementById('trimInStart')?.value || '',
@@ -643,7 +663,7 @@ function applyConfig(cfg) {
     'overlayW':'overlay_w','overlayH':'overlay_h',
     'gpuMode':'gpu_mode',
     'exportFps':'export_fps','exportBitrate':'export_bitrate',
-    'exportResW':'export_res_w','exportResH':'export_res_h',
+    'projectRes':'project_res','projectW':'project_w','projectH':'project_h',
     'trimStart':'trim_start','trimEnd':'trim_end',
     'trimInStart':'trim_in_start','trimInEnd':'trim_in_end',
     'cropX':'crop_x','cropY':'crop_y',
@@ -886,7 +906,10 @@ function toSec(t) { const [h, mn, s] = t.replace(',', '.').split(':'); return +h
 // ═══════════════════════════════════════════════
 //  Canvas preview
 // ═══════════════════════════════════════════════
-['layerOverlay','layerTitle','layerSub'].forEach(id => {
+// ═══════════════════════════════════════════════
+//  Layer switching
+// ═══════════════════════════════════════════════
+['layerVideo','layerOverlay','layerTitle','layerSub'].forEach(id => {
   const el = document.getElementById(id);
   if (el) el.addEventListener('change', () => { if (el.checked) activeLayer = id.replace('layer','').toLowerCase(); });
 });
@@ -936,7 +959,7 @@ let titlePos = { x: {{ job.title_x | default(10) | int }}, y: {{ job.title_y | d
 let subPos = { y: {{ job.sub_y | default(30) | int }} };
 let srtEntries = [], currentSubIndex = -1;
 let dragging = null, dragStart = {}, canvasReady = false;
-let activeLayer = 'overlay';
+let activeLayer = 'video';
 
 function parsePositiveInt(value, fallback) { const n = parseInt(value); return Number.isFinite(n) && n > 0 ? n : fallback; }
 function getOvWH() {
@@ -960,19 +983,115 @@ function getOvWH() {
 }());
 {% endif %}
 
+function getTargetResolution() {
+  const preset = document.getElementById('projectRes')?.value || 'source';
+  const presets = {
+    '1080x1920': [1080, 1920], '1920x1080': [1920, 1080],
+    '1080x1080': [1080, 1080], '1280x720': [1280, 720], '720x1280': [720, 1280],
+  };
+  if (presets[preset]) return presets[preset];
+  if (preset === 'custom') {
+    const w = parseInt(document.getElementById('projectW')?.value) || 0;
+    const h = parseInt(document.getElementById('projectH')?.value) || 0;
+    if (w > 0 && h > 0) return [w, h];
+  }
+  // fall back to source video dimensions
+  return [video.videoWidth || 540, video.videoHeight || 960];
+}
+
+function getSourceTransform() {
+  // Returns {sx, sy, sw, sh} — the region of the SOURCE that is visible
+  // within the target frame, accounting for zoom and pan.
+  const [tw, th] = getTargetResolution();
+  const sw = video.videoWidth || tw;
+  const sh = video.videoHeight || th;
+  const zoom = parseFloat(document.getElementById('videoScale')?.value) || 1.0;
+  const panX = parseFloat(document.getElementById('videoPanX')?.value) || 0;
+  const panY = parseFloat(document.getElementById('videoPanY')?.value) || 0;
+  // Cover-scale: scale source so it covers target
+  const fillW = tw / sw, fillH = th / sh;
+  const baseScale = Math.max(fillW, fillH);
+  const totalScale = baseScale * zoom;
+  const scaledW = sw * totalScale;
+  const scaledH = sh * totalScale;
+  const cx = (scaledW - tw) / 2 + panX;
+  const cy = (scaledH - th) / 2 + panY;
+  // The visible source region (in source pixels)
+  const sx = cx / totalScale;
+  const sy = cy / totalScale;
+  const ssw = tw / totalScale;
+  const ssh = th / totalScale;
+  return { sx, sy, sw: ssw, sh: ssh };
+}
+
+function updateProjectResLabel() {
+  const label = document.getElementById('projectResLabel');
+  if (!label) return;
+  const [tw, th] = getTargetResolution();
+  const sw = video.videoWidth || tw;
+  const sh = video.videoHeight || th;
+  label.textContent = `${sw}×${sh} → ${tw}×${th}`;
+}
+
+function updateTransformInfo() {
+  const el = document.getElementById('transformInfo');
+  if (!el) return;
+  const [tw, th] = getTargetResolution();
+  const sw = video.videoWidth || tw;
+  const sh = video.videoHeight || th;
+  const zoom = parseFloat(document.getElementById('videoScale')?.value) || 1.0;
+  if (tw === sw && th === sh && zoom === 1.0) { el.textContent = ''; return; }
+  el.textContent = `${sw}×${sh} → ${tw}×${th} ×${zoom.toFixed(2)}`;
+}
+
+// Show/hide custom W/H fields based on preset selection
+document.getElementById('projectRes')?.addEventListener('change', function() {
+  const showCustom = this.value === 'custom';
+  document.getElementById('customResWGrp').style.display = showCustom ? '' : 'none';
+  document.getElementById('customResHGrp').style.display = showCustom ? '' : 'none';
+  updateProjectResLabel();
+  updateTransformInfo();
+  resizeCanvasToTarget();
+});
+// Run once to set initial state
+(function() {
+  const sel = document.getElementById('projectRes');
+  if (sel && sel.value !== 'custom') {
+    document.getElementById('customResWGrp').style.display = 'none';
+    document.getElementById('customResHGrp').style.display = 'none';
+  }
+  updateProjectResLabel();
+})();
+
+document.getElementById('projectW')?.addEventListener('input', () => { updateProjectResLabel(); resizeCanvasToTarget(); });
+document.getElementById('projectH')?.addEventListener('input', () => { updateProjectResLabel(); resizeCanvasToTarget(); });
+document.getElementById('videoScale')?.addEventListener('input', updateTransformInfo);
+document.getElementById('videoPanX')?.addEventListener('input', updateTransformInfo);
+document.getElementById('videoPanY')?.addEventListener('input', updateTransformInfo);
+
+function resizeCanvasToTarget() {
+  const [tw, th] = getTargetResolution();
+  canvas.width = tw;
+  canvas.height = th;
+  document.getElementById('previewW').value = tw;
+  document.getElementById('previewH').value = th;
+}
+
 video.addEventListener('loadedmetadata', () => {
-  canvas.width = video.videoWidth || 540;
-  canvas.height = video.videoHeight || 960;
-  document.getElementById('previewW').value = video.videoWidth;
-  document.getElementById('previewH').value = video.videoHeight;
+  const [tw, th] = getTargetResolution();
+  canvas.width = tw;
+  canvas.height = th;
+  document.getElementById('previewW').value = tw;
+  document.getElementById('previewH').value = th;
   canvasReady = true;
   const slider = document.getElementById('timeSlider');
   if (slider) slider.max = video.duration || 0;
+  updateProjectResLabel();
   video.muted = true;
   video.play().then(() => { setTimeout(() => { video.muted = false; }, 600); }).catch(() => {});
 });
-video.addEventListener('loadeddata', () => { canvas.width = video.videoWidth || canvas.width; canvas.height = video.videoHeight || canvas.height; canvasReady = true; });
-video.addEventListener('canplay', () => { canvasReady = true; if (video.paused) { video.muted = true; video.play().then(() => { setTimeout(() => { video.muted = false; }, 600); }).catch(() => {}); } });
+video.addEventListener('loadeddata', () => { resizeCanvasToTarget(); canvasReady = true; });
+video.addEventListener('canplay', () => { canvasReady = true; updateProjectResLabel(); if (video.paused) { video.muted = true; video.play().then(() => { setTimeout(() => { video.muted = false; }, 600); }).catch(() => {}); } });
 
 const timeSlider = document.getElementById('timeSlider');
 if (timeSlider) {
@@ -1022,8 +1141,27 @@ function drawFrame() {
   if (!canvasReady) { requestAnimationFrame(drawFrame); return; }
   const c = getConf();
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  if (video.readyState >= 2) { ctx.drawImage(video, 0, 0, canvas.width, canvas.height); }
+  // Draw source video scaled/zoomed/panned into the target canvas
+  if (video.readyState >= 2) {
+    const T = getSourceTransform();
+    const srcW = video.videoWidth, srcH = video.videoHeight;
+    // drawImage(source, sx, sy, sWidth, sHeight, dx, dy, dWidth, dHeight)
+    ctx.drawImage(video, T.sx, T.sy, T.sw, T.sh, 0, 0, canvas.width, canvas.height);
+  }
   else { ctx.fillStyle = '#111'; ctx.fillRect(0, 0, canvas.width, canvas.height); }
+
+  // Target frame outline overlay (dashed border at canvas edges)
+  const [tw, th] = getTargetResolution();
+  const sw = video.videoWidth || tw;
+  const sh = video.videoHeight || th;
+  if (tw !== sw || th !== sh) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([8, 4]);
+    ctx.strokeRect(0.5, 0.5, canvas.width - 1, canvas.height - 1);
+    ctx.restore();
+  }
 
   // overlay
   if (overlayImg) {
@@ -1203,7 +1341,7 @@ function loadAllFonts() {
 loadAllFonts().then(() => { requestAnimationFrame(drawFrame); });
 
 // ═══════════════════════════════════════════════
-//  Drag and drop
+//  Drag and drop (with video pan & scroll zoom)
 // ═══════════════════════════════════════════════
 function canvasPt(e) { const r = canvas.getBoundingClientRect(); return { x: (e.clientX - r.left) * (canvas.width / r.width), y: (e.clientY - r.top) * (canvas.height / r.height) }; }
 function hitOverlay(p) { if (activeLayer !== 'overlay') return false; const c = getConf(); return overlayImg && p.x >= overlayPos.x && p.x <= overlayPos.x + c.ovW && p.y >= overlayPos.y && p.y <= overlayPos.y + c.ovH; }
@@ -1211,9 +1349,35 @@ function hitOverlayResize(p, c) { if (activeLayer !== 'overlay') return false; c
 function hitTitle(p) { if (activeLayer !== 'title') return false; const c = getConf(); if (!c.titleText) return false; const lines = c.titleText.split('\n'); const lh = c.titleSize * 1.2 + (c.titleLineSpacing || 0); const totalH = Math.max(c.titleSize, lines.length * lh); const w = c.titleText.length * c.titleSize * 0.55; return p.x >= titlePos.x && p.x <= titlePos.x + w && p.y >= titlePos.y && p.y <= titlePos.y + totalH; }
 function hitSub(p) { if (activeLayer !== 'sub') return false; return Math.abs(p.y - (canvas.height - subPos.y)) < 20; }
 
+function panToPixelDelta(panPxX, panPxY) {
+  // Convert a canvas-pixel drag delta into a pan_x/pan_y adjustment.
+  // The pan values are in source-pixel space after cover-scale and zoom.
+  const zoom = parseFloat(document.getElementById('videoScale')?.value) || 1.0;
+  const [tw, th] = getTargetResolution();
+  const sw = video.videoWidth || tw;
+  const sh = video.videoHeight || th;
+  const fillW = tw / sw, fillH = th / sh;
+  const baseScale = Math.max(fillW, fillH);
+  const totalScale = baseScale * zoom;
+  // panPxX is the number of canvas (target) pixels the user dragged.
+  // In source-pixel space (after cover-scale), that's panPxX / baseScale.
+  // But pan_x is in post-scale pre-crop coordinates, so: panPxX.
+  // Actually: pan is applied after the scale*zoom, so 1 pan unit = 1 pixel in the
+  // scaled coordinate space = 1/totalScale in source pixels.
+  // Drag of N canvas pixels → pan change of N.
+  return { dx: panPxX, dy: panPxY };
+}
+
 canvas.addEventListener('mousedown', e => {
   const p = canvasPt(e); const c = getConf();
-  if (activeLayer === 'overlay' && hitOverlayResize(p, c)) { dragging = 'overlay-resize'; dragStart = { mx: p.x, my: p.y, ow: c.ovW, oh: c.ovH }; }
+  if (activeLayer === 'video') {
+    // Drag anywhere on canvas pans the video
+    dragging = 'video';
+    const px = parseFloat(document.getElementById('videoPanX')?.value) || 0;
+    const py = parseFloat(document.getElementById('videoPanY')?.value) || 0;
+    dragStart = { mx: p.x, my: p.y, ox: px, oy: py };
+  }
+  else if (activeLayer === 'overlay' && hitOverlayResize(p, c)) { dragging = 'overlay-resize'; dragStart = { mx: p.x, my: p.y, ow: c.ovW, oh: c.ovH }; }
   else if (activeLayer === 'overlay' && hitOverlay(p)) { dragging = 'overlay'; dragStart = { mx: p.x, my: p.y, ox: overlayPos.x, oy: overlayPos.y }; }
   else if (activeLayer === 'title' && hitTitle(p)) { dragging = 'title'; dragStart = { mx: p.x, my: p.y, ox: titlePos.x, oy: titlePos.y }; }
   else if (activeLayer === 'sub' && hitSub(p)) { dragging = 'sub'; dragStart = { my: p.y, oy: subPos.y }; }
@@ -1223,11 +1387,18 @@ canvas.addEventListener('mousemove', e => {
   const p = canvasPt(e);
   if (!dragging) {
     const c = getConf(); const overHandle = activeLayer === 'overlay' && hitOverlayResize(p, c);
-    const hit = overHandle || (activeLayer === 'overlay' && hitOverlay(p)) || (activeLayer === 'title' && hitTitle(p)) || (activeLayer === 'sub' && hitSub(p));
-    canvas.style.cursor = overHandle ? 'nwse-resize' : hit ? 'grab' : 'crosshair'; return;
+    const hit = (activeLayer === 'video') || overHandle || (activeLayer === 'overlay' && hitOverlay(p)) || (activeLayer === 'title' && hitTitle(p)) || (activeLayer === 'sub' && hitSub(p));
+    canvas.style.cursor = activeLayer === 'video' ? 'grab' : overHandle ? 'nwse-resize' : hit ? 'grab' : 'crosshair'; return;
   }
   const dx = p.x - (dragStart.mx || 0), dy = p.y - dragStart.my;
-  if (dragging === 'overlay-resize') {
+  if (dragging === 'video') {
+    const newPanX = Math.round(dragStart.ox + dx);
+    const newPanY = Math.round(dragStart.oy + dy);
+    document.getElementById('videoPanX').value = newPanX;
+    document.getElementById('videoPanY').value = newPanY;
+    updateTransformInfo();
+  }
+  else if (dragging === 'overlay-resize') {
     const lock = document.getElementById('lockAspect')?.checked;
     let w = Math.max(10, Math.round(dragStart.ow + dx)), h = Math.max(10, Math.round(dragStart.oh + dy));
     if (lock && overlayAspect) { if (Math.abs(dx) >= Math.abs(dy)) { h = Math.max(10, Math.round(w / overlayAspect)); } else { w = Math.max(10, Math.round(h * overlayAspect)); } }
@@ -1235,12 +1406,27 @@ canvas.addEventListener('mousemove', e => {
     document.getElementById('overlayW').value = w; document.getElementById('overlayH').value = h;
     canvas.style.cursor = 'nwse-resize'; return;
   }
-  if (dragging === 'overlay') { overlayPos.x = Math.round(dragStart.ox + dx); overlayPos.y = Math.round(dragStart.oy + dy); document.getElementById('overlayX').value = overlayPos.x; document.getElementById('overlayY').value = overlayPos.y; }
+  else if (dragging === 'overlay') { overlayPos.x = Math.round(dragStart.ox + dx); overlayPos.y = Math.round(dragStart.oy + dy); document.getElementById('overlayX').value = overlayPos.x; document.getElementById('overlayY').value = overlayPos.y; }
   else if (dragging === 'title') { titlePos.x = Math.round(dragStart.ox + dx); titlePos.y = Math.round(dragStart.oy + dy); document.getElementById('titleX').value = titlePos.x; document.getElementById('titleY').value = titlePos.y; }
   else if (dragging === 'sub') { subPos.y = Math.max(0, Math.round(dragStart.oy - dy)); document.getElementById('subY').value = subPos.y; document.getElementById('subYNum').value = subPos.y; }
 });
-canvas.addEventListener('mouseup', () => { dragging = null; canvas.style.cursor = 'crosshair'; });
+canvas.addEventListener('mouseup', () => { dragging = null; canvas.style.cursor = activeLayer === 'video' ? 'grab' : 'crosshair'; });
 canvas.addEventListener('mouseleave', () => { dragging = null; });
+
+// Scroll wheel zoom (when Video layer is active or hovering canvas)
+canvas.addEventListener('wheel', e => {
+  if (activeLayer !== 'video') return;
+  e.preventDefault();
+  const zoomEl = document.getElementById('videoScale');
+  if (!zoomEl) return;
+  let zoom = parseFloat(zoomEl.value) || 1.0;
+  // Zoom step: 5% per wheel tick
+  const step = 0.05;
+  if (e.deltaY < 0) zoom = Math.min(5.0, +(zoom + step).toFixed(2));
+  else zoom = Math.max(0.1, +(zoom - step).toFixed(2));
+  zoomEl.value = zoom;
+  updateTransformInfo();
+}, { passive: false });
 
 // overlay upload
 document.getElementById('overlayInput').addEventListener('change', e => {
