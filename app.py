@@ -123,10 +123,110 @@ def ffmpeg_env():
 FONTCONFIG_CONF = setup_fontconfig()
 print(f"Fontconfig set up: FONTCONFIG_PATH={BASE_DIR}")
 
-FONT_DOWNLOAD_URLS = {
-    'Inter':      ('Inter-Regular.ttf', 'https://github.com/google/fonts/raw/main/ofl/inter/Inter%5Bopsz%2Cwght%5D.ttf'),
-    'Inter Bold': ('Inter-Bold.ttf',   'https://github.com/google/fonts/raw/main/ofl/inter/Inter%5Bopsz%2Cwght%5D.ttf'),
+# ═══════════════════════════════════════════════════════════════════════════
+#  Font library – downloadable Google Fonts (static + variable)
+# ═══════════════════════════════════════════════════════════════════════════
+# Format: 'static' = traditional single-weight file
+#         'variable' = OpenType variable font (wght axis → one file, all weights)
+
+FONT_LIBRARY = {
+    'Inter': {
+        'filename': 'Inter-Variable.ttf',
+        'url': 'https://github.com/google/fonts/raw/main/ofl/inter/Inter%5Bopsz%2Cwght%5D.ttf',
+        'format': 'variable',
+    },
+    'Roboto': {
+        'filename': 'Roboto-Variable.ttf',
+        'url': 'https://github.com/google/fonts/raw/main/apache/roboto/Roboto%5Bwdth%2Cwght%5D.ttf',
+        'format': 'variable',
+    },
+    'Open Sans': {
+        'filename': 'OpenSans-Variable.ttf',
+        'url': 'https://github.com/google/fonts/raw/main/ofl/opensans/OpenSans%5Bwdth%2Cwght%5D.ttf',
+        'format': 'variable',
+    },
+    'Montserrat': {
+        'filename': 'Montserrat-Variable.ttf',
+        'url': 'https://github.com/google/fonts/raw/main/ofl/montserrat/Montserrat%5Bwght%5D.ttf',
+        'format': 'variable',
+    },
+    'Poppins': {
+        'filename': 'Poppins-Regular.ttf',
+        'url': 'https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-Regular.ttf',
+        'format': 'static',
+    },
+    'Oswald': {
+        'filename': 'Oswald-Variable.ttf',
+        'url': 'https://github.com/google/fonts/raw/main/ofl/oswald/Oswald%5Bwght%5D.ttf',
+        'format': 'variable',
+    },
+    'Bebas Neue': {
+        'filename': 'BebasNeue-Regular.ttf',
+        'url': 'https://github.com/google/fonts/raw/main/ofl/bebasneue/BebasNeue-Regular.ttf',
+        'format': 'static',
+    },
+    'Anton': {
+        'filename': 'Anton-Regular.ttf',
+        'url': 'https://github.com/google/fonts/raw/main/ofl/anton/Anton-Regular.ttf',
+        'format': 'static',
+    },
+    'Lato': {
+        'filename': 'Lato-Regular.ttf',
+        'url': 'https://github.com/google/fonts/raw/main/ofl/lato/Lato-Regular.ttf',
+        'format': 'static',
+    },
+    'Playfair Display': {
+        'filename': 'PlayfairDisplay-Variable.ttf',
+        'url': 'https://github.com/google/fonts/raw/main/ofl/playfairdisplay/PlayfairDisplay%5Bwght%5D.ttf',
+        'format': 'variable',
+    },
+    'Raleway': {
+        'filename': 'Raleway-Variable.ttf',
+        'url': 'https://github.com/google/fonts/raw/main/ofl/raleway/Raleway%5Bwght%5D.ttf',
+        'format': 'variable',
+    },
+    'Nunito': {
+        'filename': 'Nunito-Variable.ttf',
+        'url': 'https://github.com/google/fonts/raw/main/ofl/nunito/Nunito%5Bwght%5D.ttf',
+        'format': 'variable',
+    },
+    'Ubuntu': {
+        'filename': 'Ubuntu-Regular.ttf',
+        'url': 'https://github.com/google/fonts/raw/main/ufl/ubuntu/Ubuntu-Regular.ttf',
+        'format': 'static',
+    },
+    'Source Sans 3': {
+        'filename': 'SourceSans3-Variable.ttf',
+        'url': 'https://github.com/google/fonts/raw/main/ofl/sourcesans3/SourceSans3%5Bwght%5D.ttf',
+        'format': 'variable',
+    },
+    'Caveat': {
+        'filename': 'Caveat-Variable.ttf',
+        'url': 'https://github.com/google/fonts/raw/main/ofl/caveat/Caveat%5Bwght%5D.ttf',
+        'format': 'variable',
+    },
+    'Dancing Script': {
+        'filename': 'DancingScript-Variable.ttf',
+        'url': 'https://github.com/google/fonts/raw/main/ofl/dancingscript/DancingScript%5Bwght%5D.ttf',
+        'format': 'variable',
+    },
+    'Rubik': {
+        'filename': 'Rubik-Variable.ttf',
+        'url': 'https://github.com/google/fonts/raw/main/ofl/rubik/Rubik%5Bwght%5D.ttf',
+        'format': 'variable',
+    },
+    'Arimo': {
+        'filename': 'Arimo-Variable.ttf',
+        'url': 'https://github.com/google/fonts/raw/main/apache/arimo/Arimo%5Bwght%5D.ttf',
+        'format': 'variable',
+    },
+    'Archivo Black': {
+        'filename': 'ArchivoBlack-Regular.ttf',
+        'url': 'https://github.com/google/fonts/raw/main/ofl/archivoblack/ArchivoBlack-Regular.ttf',
+        'format': 'static',
+    },
 }
+
 ALLOWED_FONT_EXTENSIONS = {'ttf', 'otf'}
 
 def allowed_font_file(filename):
@@ -145,7 +245,84 @@ def download_font_file(dest_path, url):
         return False
 
 
+def is_variable_font(font_path):
+    """Detect whether a .ttf/.otf file is an OpenType variable font.
+
+    Uses fontTools when available (reliable), falls back to a quick
+    binary scan for the ``fvar`` table tag and filename heuristics.
+    """
+    try:
+        from fontTools.ttLib import TTFont
+        font = TTFont(font_path)
+        has_fvar = 'fvar' in font
+        font.close()
+        if has_fvar:
+            return True
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # Binary scan: look for 'fvar' among the first 60 table records
+    try:
+        import struct
+        with open(font_path, 'rb') as f:
+            header = f.read(12)
+            if len(header) < 12:
+                return False
+            sfVersion, numTables = struct.unpack('>IH', header[0:6])
+            if sfVersion in (0x00010000, 0x4F54544F):
+                for _ in range(min(numTables, 60)):
+                    record = f.read(16)
+                    if len(record) < 16:
+                        break
+                    tag = record[0:4].decode('ascii', errors='ignore')
+                    if tag == 'fvar':
+                        return True
+    except Exception:
+        pass
+
+    # Fallback: filename heuristics
+    basename = os.path.basename(font_path).lower()
+    if any(hint in basename for hint in ('-variable', '[wght', 'variablefont')):
+        return True
+
+    return False
+
+
+# Backward-compatible: ensure Inter is available by default
+def ensure_default_fonts():
+    """Download the Inter variable font if no fonts exist in the fonts directory."""
+    existing = [f for f in os.listdir(FONTS_DIR)
+                if f.lower().endswith(('.ttf', '.otf'))] if os.path.isdir(FONTS_DIR) else []
+    if not existing:
+        for font_name in ('Inter',):
+            info = FONT_LIBRARY.get(font_name)
+            if info:
+                dest_path = os.path.join(FONTS_DIR, info['filename'])
+                if not os.path.exists(dest_path):
+                    if download_font_file(dest_path, info['url']):
+                        print(f"Downloaded default font: {font_name}")
+        # Also download old-style Inter for backward compatibility
+        old_inter = os.path.join(FONTS_DIR, 'Inter-Regular.ttf')
+        if not os.path.exists(old_inter):
+            info = FONT_LIBRARY['Inter']
+            download_font_file(old_inter, info['url'])
+
+
+def download_font_by_name(font_name):
+    """Download a font from the library by its display name. Returns True on success."""
+    info = FONT_LIBRARY.get(font_name)
+    if not info:
+        return False
+    dest_path = os.path.join(FONTS_DIR, info['filename'])
+    if os.path.exists(dest_path):
+        return True  # already downloaded
+    return download_font_file(dest_path, info['url'])
+
+
 def _add_common_linux_fonts(font_map):
+    """Add common Linux Inter font paths to *font_map*."""
     candidates = [
         ('Inter', '/usr/share/fonts/truetype/inter/Inter-Regular.ttf'),
         ('Inter Bold', '/usr/share/fonts/truetype/inter/Inter-Bold.ttf'),
@@ -162,75 +339,85 @@ def _add_common_linux_fonts(font_map):
 
 
 def build_font_map():
+    """Build a {display_name: filesystem_path} dict for all available fonts.
+
+    Scans the local ``fonts/`` directory first.  For variable fonts the
+    single file is exposed under its canonical name.  Falls back to
+    system fonts when the local directory is empty.
+    """
     font_map = {}
+
     if os.path.isdir(FONTS_DIR):
         for fname in os.listdir(FONTS_DIR):
-            if fname.lower().endswith(('.ttf', '.otf')):
-                name = os.path.splitext(fname)[0]
-                path = os.path.join(FONTS_DIR, fname)
-                if name in ('Inter-Regular', 'Inter'):
-                    font_map['Inter'] = path
-                    continue
-                if name in ('Inter-Bold', 'InterBold'):
-                    font_map['Inter Bold'] = path
-                    continue
-                font_map[name] = path
-    if not font_map:
-        if sys.platform.startswith('win'):
-            font_map = {
-                'Arial':           'C:/Windows/Fonts/arial.ttf',
-                'Arial Bold':      'C:/Windows/Fonts/arialbd.ttf',
-                'Impact':          'C:/Windows/Fonts/impact.ttf',
-                'Georgia':         'C:/Windows/Fonts/georgia.ttf',
-                'Verdana':         'C:/Windows/Fonts/verdana.ttf',
-                'Courier New':     'C:/Windows/Fonts/cour.ttf',
-                'Times New Roman': 'C:/Windows/Fonts/times.ttf',
-                'Trebuchet MS':    'C:/Windows/Fonts/trebuc.ttf',
-                'Calibri':         'C:/Windows/Fonts/calibri.ttf',
-                'Segoe UI':        'C:/Windows/Fonts/segoeui.ttf',
-                'Comic Sans MS':   'C:/Windows/Fonts/comic.ttf',
+            if not fname.lower().endswith(('.ttf', '.otf')):
+                continue
+            path = os.path.join(FONTS_DIR, fname)
+            name = os.path.splitext(fname)[0]
+
+            # ── map well‑known names to their canonical display name ──
+            canonical = {
+                'Inter-Regular': 'Inter', 'Inter': 'Inter',
+                'Inter-Bold': 'Inter Bold', 'InterBold': 'Inter Bold',
+                'Inter-Variable': 'Inter',
             }
-        else:
-            font_map = {
-                'DejaVu Sans':      '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-                'DejaVu Sans Bold': '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
-                'Liberation Sans':  '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
-                'Liberation Sans Bold': '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf',
-                'FreeSerif':        '/usr/share/fonts/truetype/freefont/FreeSerif.ttf',
-                'FreeSans':         '/usr/share/fonts/truetype/freefont/FreeSans.ttf',
-            }
-            _add_common_linux_fonts(font_map)
-    else:
-        if sys.platform.startswith('win'):
-            font_map.update({
-                'Arial':           'C:/Windows/Fonts/arial.ttf',
-                'Arial Bold':      'C:/Windows/Fonts/arialbd.ttf',
-                'Impact':          'C:/Windows/Fonts/impact.ttf',
-                'Georgia':         'C:/Windows/Fonts/georgia.ttf',
-                'Verdana':         'C:/Windows/Fonts/verdana.ttf',
-                'Courier New':     'C:/Windows/Fonts/cour.ttf',
-                'Times New Roman': 'C:/Windows/Fonts/times.ttf',
-                'Trebuchet MS':    'C:/Windows/Fonts/trebuc.ttf',
-                'Calibri':         'C:/Windows/Fonts/calibri.ttf',
-                'Segoe UI':        'C:/Windows/Fonts/segoeui.ttf',
-                'Comic Sans MS':   'C:/Windows/Fonts/comic.ttf',
-            })
-        else:
-            _add_common_linux_fonts(font_map)
+            if name in canonical:
+                font_map.setdefault(canonical[name], path)
+                continue
+
+            # ── detect font‑library entries by filename ──
+            matched = False
+            for lib_name, info in FONT_LIBRARY.items():
+                if info['filename'] == fname:
+                    font_map[lib_name] = path
+                    matched = True
+                    break
+            if matched:
+                continue
+
+            # ── fallback: use the filename stem as the display name ──
+            font_map[name] = path
+
+    # ── merge system fonts ─────────────────────────────────────────
+    _add_system_fonts(font_map)
     return font_map
+
+
+def _add_system_fonts(font_map):
+    """Add platform system fonts to *font_map* (does not overwrite existing keys)."""
+    if sys.platform.startswith('win'):
+        candidates = {
+            'Arial':           'C:/Windows/Fonts/arial.ttf',
+            'Arial Bold':      'C:/Windows/Fonts/arialbd.ttf',
+            'Impact':          'C:/Windows/Fonts/impact.ttf',
+            'Georgia':         'C:/Windows/Fonts/georgia.ttf',
+            'Verdana':         'C:/Windows/Fonts/verdana.ttf',
+            'Courier New':     'C:/Windows/Fonts/cour.ttf',
+            'Times New Roman': 'C:/Windows/Fonts/times.ttf',
+            'Trebuchet MS':    'C:/Windows/Fonts/trebuc.ttf',
+            'Calibri':         'C:/Windows/Fonts/calibri.ttf',
+            'Segoe UI':        'C:/Windows/Fonts/segoeui.ttf',
+            'Comic Sans MS':   'C:/Windows/Fonts/comic.ttf',
+        }
+    else:
+        candidates = {
+            'DejaVu Sans':      '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+            'DejaVu Sans Bold': '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+            'Liberation Sans':  '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+            'Liberation Sans Bold': '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf',
+            'FreeSerif':        '/usr/share/fonts/truetype/freefont/FreeSerif.ttf',
+            'FreeSans':         '/usr/share/fonts/truetype/freefont/FreeSans.ttf',
+        }
+        _add_common_linux_fonts(candidates)
+
+    for name, path in candidates.items():
+        if os.path.exists(path):
+            font_map.setdefault(name, path)
 
 
 def refresh_font_map():
     global FONT_MAP
     FONT_MAP = build_font_map()
 
-
-def ensure_default_fonts():
-    for font_name, (filename, url) in FONT_DOWNLOAD_URLS.items():
-        dest_path = os.path.join(FONTS_DIR, filename)
-        if not os.path.exists(dest_path):
-            if download_font_file(dest_path, url):
-                print(f"Downloaded default font: {font_name}")
 
 ensure_default_fonts()
 refresh_font_map()
@@ -1755,6 +1942,38 @@ def api_delete_template(name):
     return json.dumps({'ok': True})
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+#  Font library API – list available fonts & trigger downloads
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/fonts/library', methods=['GET'])
+@login_required
+def api_font_library():
+    """Return the list of downloadable fonts with their status (downloaded / available)."""
+    result = []
+    for name, info in FONT_LIBRARY.items():
+        dest_path = os.path.join(FONTS_DIR, info['filename'])
+        downloaded = os.path.exists(dest_path)
+        result.append({
+            'name': name,
+            'format': info['format'],
+            'downloaded': downloaded,
+        })
+    return json.dumps(result)
+
+
+@app.route('/api/fonts/download/<name>', methods=['POST'])
+@login_required
+def api_download_font(name):
+    """Download a specific font from the library."""
+    if name not in FONT_LIBRARY:
+        return json.dumps({'ok': False, 'error': 'Font not in library'}), 404
+    if download_font_by_name(name):
+        refresh_font_map()
+        return json.dumps({'ok': True, 'name': name})
+    return json.dumps({'ok': False, 'error': 'Download failed'}), 500
+
+
 @app.route('/editor/<job_id>', methods=['GET', 'POST'])
 @login_required
 def editor(job_id):
@@ -1800,9 +2019,28 @@ def editor(job_id):
 
     if request.method == 'POST':
         save_only = request.form.get('save') == '1'
+        upload_font_only = request.form.get('upload_font') == '1'
+
+        # ── handle font upload (may be standalone action) ───────────
+        font_file = request.files.get('font_file')
+        if font_file and font_file.filename:
+            safe_name = os.path.basename(font_file.filename)
+            if allowed_font_file(safe_name):
+                dest_path = os.path.join(FONTS_DIR, safe_name)
+                font_file.save(dest_path)
+                refresh_font_map()
+                flash(f"Font uploaded: {safe_name}", 'success')
+                if upload_font_only:
+                    save_jobs()
+                    return redirect(url_for('editor', job_id=job_id))
+            else:
+                flash('Font upload failed: only .ttf and .otf files are allowed.', 'danger')
+                if upload_font_only:
+                    return redirect(url_for('editor', job_id=job_id))
 
         # ── Import SRT/ASS file ──────────────────────────────────────────
         subtitle_file = request.files.get('subtitle_file')
+        subtitle_imported = False  # flag to skip SRT-save/ASS-rebuild below
         if subtitle_file and subtitle_file.filename:
             safe_name = os.path.basename(subtitle_file.filename)
             ext = os.path.splitext(safe_name)[1].lower()
@@ -1824,35 +2062,47 @@ def editor(job_id):
                         job['ass'] = ass_name
                     except Exception as e:
                         update_job(job_id, log=f"warning: could not build ASS from imported SRT: {e}")
+                # Reload srt_text from the newly imported file so the
+                # textarea shows the new content instead of stale old text.
+                if ext == '.srt':
+                    with open(dest_path, encoding='utf-8') as f:
+                        raw = f.read()
+                    srt_text = re.sub(r"\r\n?|\n", "\n", raw).strip()
+                    srt_text = re.sub(r"\n{3,}", "\n\n", srt_text)
+                subtitle_imported = True
                 flash(f'Subtitles imported: {safe_name}', 'success')
             else:
                 flash('Only .srt and .ass files are supported for subtitle import.', 'warning')
 
         # ── save SRT edits ────────────────────────────────────────────────
-        # strip accumulated leading/trailing whitespace so every save is clean
-        new_srt = request.form.get('srt_text', '').strip()
-        # normalize before saving to keep file tidy
-        new_srt = re.sub(r"\r\n?|\n", "\n", new_srt)
-        new_srt = re.sub(r"\n{3,}", "\n\n", new_srt)
-        if os.path.exists(srt_path):
-            with open(srt_path, 'w', encoding='utf-8', newline='\n') as f:
-                f.write(new_srt)
-        srt_text = new_srt
+        # Skip this block when a new subtitle file was just imported –
+        # the textarea still holds the *old* subtitle text and would
+        # overwrite the freshly imported file.
+        if not subtitle_imported:
+            # strip accumulated leading/trailing whitespace so every save is clean
+            new_srt = request.form.get('srt_text', '').strip()
+            # normalize before saving to keep file tidy
+            new_srt = re.sub(r"\r\n?|\n", "\n", new_srt)
+            new_srt = re.sub(r"\n{3,}", "\n\n", new_srt)
+            if os.path.isfile(srt_path):
+                with open(srt_path, 'w', encoding='utf-8', newline='\n') as f:
+                    f.write(new_srt)
+            srt_text = new_srt
 
-        # ── regenerate ASS from edited SRT ───────────────────────────────
-        # The original ASS had per-word karaoke timestamps from Whisper.
-        # After the user edits the SRT those timestamps no longer match,
-        # so we rebuild a clean ASS directly from the SRT content.
-        # The new ASS has one Dialogue event per SRT entry (no karaoke)
-        # but inherits all styling via force_style at render time.
-        if new_srt:
-            new_ass_name = os.path.splitext(job.get('srt') or '')[0] + '.ass'
-            try:
-                srt_to_ass(new_srt, os.path.join(DOWNLOADS_DIR, new_ass_name))
-                job['ass'] = new_ass_name
-            except Exception as e:
-                update_job(job_id, log=f"warning: could not rebuild ASS from SRT: {e}")
-                job.pop('ass', None)
+            # ── regenerate ASS from edited SRT ───────────────────────────
+            # The original ASS had per-word karaoke timestamps from Whisper.
+            # After the user edits the SRT those timestamps no longer match,
+            # so we rebuild a clean ASS directly from the SRT content.
+            # The new ASS has one Dialogue event per SRT entry (no karaoke)
+            # but inherits all styling via force_style at render time.
+            if new_srt:
+                new_ass_name = os.path.splitext(job.get('srt') or '')[0] + '.ass'
+                try:
+                    srt_to_ass(new_srt, os.path.join(DOWNLOADS_DIR, new_ass_name))
+                    job['ass'] = new_ass_name
+                except Exception as e:
+                    update_job(job_id, log=f"warning: could not rebuild ASS from SRT: {e}")
+                    job.pop('ass', None)
 
         # ── collect all styling fields ────────────────────────────────────
         def parse_int_field(value, default):
@@ -1976,23 +2226,15 @@ def editor(job_id):
             'sub_word_spacing': sub_word_spacing,
         })
 
-        # ── download or upload fonts ────────────────────────────────────────
-        font_file = request.files.get('font_file')
-        if font_file and font_file.filename:
-            safe_name = os.path.basename(font_file.filename)
-            if allowed_font_file(safe_name):
-                dest_path = os.path.join(FONTS_DIR, safe_name)
-                font_file.save(dest_path)
+        # ── download a font from the library (via form POST) ──────────
+        download_font_name = request.form.get('download_font_name', '').strip()
+        if download_font_name:
+            if download_font_by_name(download_font_name):
                 refresh_font_map()
-                flash(f"Font uploaded: {safe_name}", 'success')
+                save_jobs()
+                flash(f'Font "{download_font_name}" downloaded successfully.', 'success')
             else:
-                flash('Font upload failed: only .ttf and .otf files are allowed.', 'danger')
-
-        if request.form.get('download_fonts') == '1':
-            ensure_default_fonts()
-            refresh_font_map()
-            save_jobs()
-            flash('Downloaded missing Inter fonts to the fonts folder.', 'success')
+                flash(f'Font "{download_font_name}" not found in library.', 'warning')
             return redirect(url_for('editor', job_id=job_id))
 
         # ── handle overlay upload ─────────────────────────────────────────
@@ -2022,17 +2264,22 @@ def editor(job_id):
                     pass
             overlay_file.save(os.path.join(DOWNLOADS_DIR, safe_name))
             job['overlay'] = safe_name
-        # If no new file was uploaded but the hidden form field carries an
-        # overlay filename (e.g. restored from a template), link it to the
-        # job so render uses it — provided the file actually exists on disk.
-        if not job.get('overlay'):
+        else:
+            # No new file uploaded and not clearing – use the hidden field
+            # value (set by applyConfig when loading a template, or from the
+            # initial page render).  This must run unconditionally so that
+            # loading a template *replaces* any previously-set overlay.
             ov_from_field = request.form.get('current_overlay_file', '').strip()
-            overlay_path = resolve_overlay_path(ov_from_field)
-            if ov_from_field and overlay_path:
-                job['overlay'] = os.path.basename(ov_from_field)
+            if ov_from_field:
+                overlay_path = resolve_overlay_path(ov_from_field)
+                if overlay_path:
+                    job['overlay'] = os.path.basename(ov_from_field)
+                else:
+                    # File referenced by the hidden field no longer exists
+                    job.pop('overlay', None)
             else:
-                # hidden field points to a non-existent file – clear it
-                pass
+                # Hidden field is empty – user cleared the overlay in the UI
+                job.pop('overlay', None)
         overlay_filename = job.get('overlay')
 
         # when saving settings without running ffmpeg we still need to persist
@@ -2601,6 +2848,7 @@ def editor(job_id):
     )
     font_faces = []
     fonts_dir_abs = os.path.abspath(FONTS_DIR)
+    _var_cache = {}  # cache is_variable_font results per path
     for font_name, font_path in FONT_MAP.items():
         abs_path = os.path.abspath(font_path)
         if not abs_path.startswith(fonts_dir_abs):
@@ -2610,11 +2858,19 @@ def editor(job_id):
             continue
         ext = os.path.splitext(font_file)[1].lower()
         font_fmt = 'opentype' if ext == '.otf' else 'truetype'
-        font_faces.append({
+
+        # Detect variable vs static so the browser handles weight correctly
+        if abs_path not in _var_cache:
+            _var_cache[abs_path] = is_variable_font(abs_path)
+        is_var = _var_cache[abs_path]
+
+        face = {
             'name': font_name,
             'url': url_for('serve_font', filename=font_file),
             'format': font_fmt,
-        })
+            'variable': is_var,
+        }
+        font_faces.append(face)
     return render_template('editor.html', job=job, srt_content=srt_text,
                            job_key=job_id, font_list=sorted_fonts,
                            font_faces=font_faces,

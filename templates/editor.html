@@ -5,7 +5,9 @@
   @font-face {
     font-family: "{{ font.name }}";
     src: url("{{ font.url }}") format("{{ font.format }}");
+    {% if font.variable %}
     font-weight: 100 900;
+    {% endif %}
     font-style: normal;
     font-display: swap;
   }
@@ -223,7 +225,19 @@
             <div style="flex:1;min-width:140px;"><label>Upload font (.ttf/.otf)</label>
               <div class="input-group input-group-sm">
                 <input type="file" name="font_file" class="form-control" accept=".ttf,.otf" id="fontUploadInput">
-                <button type="submit" name="download_fonts" value="1" class="btn btn-outline-primary">Get Inter</button>
+                <button type="submit" name="upload_font" value="1" class="btn btn-outline-secondary" title="Upload selected font file">
+                  <i class="bi bi-upload"></i>
+                </button>
+              </div>
+            </div>
+            <div style="flex:1;min-width:140px;"><label>Download font from library</label>
+              <div class="input-group input-group-sm">
+                <select id="fontDownloadSelect" class="form-select form-select-sm">
+                  <option value="">— Choose font —</option>
+                </select>
+                <button type="button" id="downloadFontBtn" class="btn btn-outline-primary" title="Download selected font">
+                  <i class="bi bi-cloud-download"></i>
+                </button>
               </div>
             </div>
           </div>
@@ -712,15 +726,77 @@ function applyConfig(cfg) {
   subPos.y = parseInt(cfg.sub_y) || 30;
   if (cfg.overlay) {
     document.getElementById('currentOverlayFile').value = cfg.overlay;
+    document.getElementById('overlayClear').value = '0';
+    // Clear any stale file input selection
+    document.getElementById('overlayInput').value = '';
     const img = new Image();
     img.onload = () => {
       overlayImg = img;
       overlayAspect = img.naturalWidth / img.naturalHeight;
       if (!document.getElementById('overlayW').value) document.getElementById('overlayW').value = img.naturalWidth;
       if (!document.getElementById('overlayH').value) document.getElementById('overlayH').value = img.naturalHeight;
+      // Update the overlay pill
+      updateOverlayPill(cfg.overlay);
+    };
+    img.onerror = () => {
+      console.warn('Template overlay image failed to load:', cfg.overlay);
+      // Try DOWNLOADS_DIR as fallback (the original upload location)
+      const fallbackName = cfg.overlay.replace(/^[^_]+_/, '');  // strip template prefix
+      if (fallbackName !== cfg.overlay) {
+        const img2 = new Image();
+        img2.onload = () => {
+          overlayImg = img2;
+          overlayAspect = img2.naturalWidth / img2.naturalHeight;
+          if (!document.getElementById('overlayW').value) document.getElementById('overlayW').value = img2.naturalWidth;
+          if (!document.getElementById('overlayH').value) document.getElementById('overlayH').value = img2.naturalHeight;
+          document.getElementById('currentOverlayFile').value = fallbackName;
+          updateOverlayPill(fallbackName);
+        };
+        img2.onerror = () => {
+          console.error('Fallback overlay image also failed:', fallbackName);
+          clearOverlayState();
+        };
+        img2.src = '/preview/' + fallbackName;
+      } else {
+        clearOverlayState();
+      }
     };
     img.src = '/preview/' + cfg.overlay;
+  } else {
+    // Template has no overlay – clear any existing overlay from the editor
+    clearOverlayState();
   }
+}
+
+function clearOverlayState() {
+  overlayImg = null;
+  overlayAspect = null;
+  document.getElementById('currentOverlayFile').value = '';
+  document.getElementById('overlayClear').value = '0';
+  document.getElementById('overlayInput').value = '';
+  document.getElementById('overlayW').value = '';
+  document.getElementById('overlayH').value = '';
+  const pill = document.getElementById('overlayPill');
+  if (pill) pill.remove();
+}
+
+function updateOverlayPill(name) {
+  let pill = document.getElementById('overlayPill');
+  if (!name) {
+    if (pill) pill.remove();
+    return;
+  }
+  if (!pill) {
+    pill = document.createElement('span');
+    pill.id = 'overlayPill';
+    pill.className = 'pill mt-1';
+    // Insert after the overlay input row
+    const overlaySection = document.getElementById('overlayInput')?.closest('.ctrl-row');
+    if (overlaySection && overlaySection.parentNode) {
+      overlaySection.parentNode.insertBefore(pill, overlaySection.nextSibling);
+    }
+  }
+  pill.innerHTML = `<i class="bi bi-image"></i> ${name}`;
 }
 
 const msgEl = document.getElementById('templateMsg');
@@ -1318,6 +1394,7 @@ srtEntries = parseSRT(document.getElementById('srtTextarea').value);
 // Explicitly load all @font-face fonts before starting the preview loop.
 // Canvas text does NOT trigger browser font loading (only DOM text does),
 // so we must call document.fonts.load() for every font family declared in CSS.
+// Also loads bold weight for variable fonts.
 function loadAllFonts() {
   if (!document.fonts || !document.fonts.load) return Promise.resolve();
   const families = new Set();
@@ -1335,6 +1412,8 @@ function loadAllFonts() {
   for (const fam of families) {
     // load with a dummy character; forces the browser to fetch the font
     promises.push(document.fonts.load(`12px "${fam}"`).catch(() => {}));
+    // also preload bold for variable fonts
+    promises.push(document.fonts.load(`bold 12px "${fam}"`).catch(() => {}));
   }
   return Promise.all(promises);
 }
@@ -1514,15 +1593,8 @@ document.getElementById('setMidCutBtn')?.addEventListener('click', () => {
 //  Clear overlay
 // ═══════════════════════════════════════════════
 document.getElementById('clearOverlayBtn')?.addEventListener('click', () => {
-  overlayImg = null;
-  overlayAspect = null;
-  document.getElementById('currentOverlayFile').value = '';
+  clearOverlayState();
   document.getElementById('overlayClear').value = '1';
-  document.getElementById('overlayInput').value = '';
-  document.getElementById('overlayW').value = '';
-  document.getElementById('overlayH').value = '';
-  const pill = document.getElementById('overlayPill');
-  if (pill) pill.remove();
 });
 
 // ═══════════════════════════════════════════════
@@ -1568,7 +1640,7 @@ window.addEventListener('pageshow', () => {
 });
 
 // ═══════════════════════════════════════════════
-//  Font upload feedback
+//  Font upload & download
 // ═══════════════════════════════════════════════
 document.getElementById('fontUploadInput')?.addEventListener('change', function() {
   const file = this.files[0];
@@ -1579,6 +1651,98 @@ document.getElementById('fontUploadInput')?.addEventListener('change', function(
       const bar = progressEl.querySelector('.progress-bar');
       if (bar) bar.style.width = '50%';
     }
+    // Auto-submit when a font file is selected
+    this.form.requestSubmit(this);
+  }
+});
+
+// ── populate font download dropdown from API ──────────────────────────
+async function loadFontLibrary() {
+  const sel = document.getElementById('fontDownloadSelect');
+  if (!sel) return;
+  try {
+    const r = await fetch('/api/fonts/library');
+    const fonts = await r.json();
+    // Keep the placeholder option, append font options
+    sel.innerHTML = '<option value="">— Choose font —</option>';
+    for (const f of fonts) {
+      const opt = document.createElement('option');
+      opt.value = f.name;
+      const badge = f.downloaded ? ' ✓' : '';
+      const fmtLabel = f.format === 'variable' ? ' [VF]' : '';
+      opt.textContent = f.name + fmtLabel + badge;
+      if (f.downloaded) opt.style.color = 'var(--accent2)';
+      sel.appendChild(opt);
+    }
+  } catch (e) {
+    console.warn('Failed to load font library:', e);
+  }
+}
+loadFontLibrary();
+
+// ── download font button ──────────────────────────────────────────────
+document.getElementById('downloadFontBtn')?.addEventListener('click', async () => {
+  const sel = document.getElementById('fontDownloadSelect');
+  const name = sel?.value;
+  if (!name) return;
+  const btn = document.getElementById('downloadFontBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+  try {
+    const r = await fetch('/api/fonts/download/' + encodeURIComponent(name), { method: 'POST' });
+    const data = await r.json();
+    if (data.ok) {
+      // Reload the page so the new font appears in dropdowns and @font-face rules
+      window.location.reload();
+    } else {
+      alert('Download failed: ' + (data.error || 'Unknown error'));
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-cloud-download"></i>';
+    }
+  } catch (e) {
+    alert('Download failed: ' + e.message);
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-cloud-download"></i>';
+  }
+});
+
+// ── Force reload all fonts after page load (for canvas preview) ─────
+// This ensures newly uploaded/downloaded fonts appear in the preview.
+function reloadAllFonts() {
+  if (!document.fonts || !document.fonts.load) return Promise.resolve();
+  const families = new Set();
+  for (const sheet of document.styleSheets) {
+    try {
+      for (const rule of sheet.cssRules || []) {
+        if (rule instanceof CSSFontFaceRule) {
+          const fam = rule.style.getPropertyValue('font-family');
+          if (fam) families.add(fam.replace(/['"]/g, '').trim());
+        }
+      }
+    } catch (_) { /* cross-origin stylesheet – skip */ }
+  }
+  const promises = [];
+  for (const fam of families) {
+    promises.push(document.fonts.load(`12px "${fam}"`).catch(() => {}));
+    // Also try bold weight for variable fonts
+    promises.push(document.fonts.load(`bold 12px "${fam}"`).catch(() => {}));
+  }
+  return Promise.all(promises);
+}
+
+// When a font is changed in the dropdown, force-load the new font face
+document.getElementById('subFont')?.addEventListener('change', function() {
+  const fam = this.value;
+  if (fam && document.fonts && document.fonts.load) {
+    document.fonts.load(`12px "${fam}"`).catch(() => {});
+    document.fonts.load(`bold 12px "${fam}"`).catch(() => {});
+  }
+});
+document.getElementById('titleFont')?.addEventListener('change', function() {
+  const fam = this.value;
+  if (fam && document.fonts && document.fonts.load) {
+    document.fonts.load(`12px "${fam}"`).catch(() => {});
+    document.fonts.load(`bold 12px "${fam}"`).catch(() => {});
   }
 });
 
