@@ -1183,6 +1183,21 @@ if (timeSlider) {
   video.addEventListener('timeupdate', () => { if (!timeSlider.dragging) timeSlider.value = video.currentTime; });
 }
 
+const _colorCache = {};
+function getFastColor(id) {
+  if (_colorCache[id] === undefined) {
+    const el = document.getElementById(id);
+    if (el) {
+      _colorCache[id] = el.value;
+      el.addEventListener('input', e => { _colorCache[id] = e.target.value; });
+      el.addEventListener('change', e => { _colorCache[id] = e.target.value; });
+    } else {
+      return '#ffffff';
+    }
+  }
+  return _colorCache[id];
+}
+
 function getConf() {
   const { w: ovW, h: ovH } = getOvWH();
   return {
@@ -1190,22 +1205,22 @@ function getConf() {
     titleFont: document.getElementById('titleFont').value,
     titleBold: document.getElementById('titleBold')?.checked || false,
     titleSize: parseInt(document.getElementById('titleSize').value) || 48,
-    titleColor: document.getElementById('titleColor').value,
-    titleStroke: document.getElementById('titleStrokeColor').value,
+    titleColor: getFastColor('titleColor'),
+    titleStroke: getFastColor('titleStrokeColor'),
     titleLineSpacing: parseInt(document.getElementById('titleLineSpacing')?.value) || 0,
     titleLetterSpacing: parseFloat(document.getElementById('titleLetterSpacing')?.value) || 0,
     subFont: document.getElementById('subFont').value,
     subBold: document.getElementById('subBold')?.checked || false,
     subSize: parseInt(document.getElementById('subSize').value) || 18,
-    subColor: document.getElementById('subColor').value,
-    subHighlightBg: document.getElementById('subHighlightColor').value,
-    subHighlightText: document.getElementById('subHighlightTextColor').value,
+    subColor: getFastColor('subColor'),
+    subHighlightBg: getFastColor('subHighlightColor'),
+    subHighlightText: getFastColor('subHighlightTextColor'),
     subHighlightOpacity: parseInt(document.getElementById('subHighlightOpacity')?.value) / 100 || 1,
-    subStroke: document.getElementById('subStrokeColor').value,
+    subStroke: getFastColor('subStrokeColor'),
     subOutlineW: parseFloat(document.getElementById('subOutlineW').value) || 2,
     subHlBox: parseFloat(document.getElementById('subHlBox').value) || 16,
     subBgEnabled: document.getElementById('subBgEnabled').checked,
-    subBgColor: document.getElementById('subBgColor').value,
+    subBgColor: getFastColor('subBgColor'),
     subBgOpacity: parseInt(document.getElementById('subBgOpacity').value) || 60,
     subLineSpacing: parseInt(document.getElementById('subLineSpacing')?.value) || 0,
     subLetterSpacing: parseFloat(document.getElementById('subLetterSpacing')?.value) || 0,

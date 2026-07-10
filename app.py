@@ -338,6 +338,26 @@ def _add_common_linux_fonts(font_map):
             font_map.setdefault(name, path)
 
 
+def _get_true_font_name(path, fallback):
+    """Attempt to extract the real font family name from the file."""
+    if sys.platform.startswith('linux'):
+        try:
+            r = subprocess.run(['fc-scan', '--format', '%{family}\\n', path], capture_output=True, text=True, timeout=2)
+            if r.stdout.strip():
+                return r.stdout.strip().split(',')[0]
+        except Exception:
+            pass
+    try:
+        from fontTools.ttLib import TTFont
+        font = TTFont(path, fontNumber=0) if path.lower().endswith('.ttc') else TTFont(path)
+        name_record = font['name'].getDebugName(1)
+        if name_record:
+            return name_record
+    except Exception:
+        pass
+    return fallback
+
+
 def build_font_map():
     """Build a {display_name: filesystem_path} dict for all available fonts.
 
@@ -374,8 +394,8 @@ def build_font_map():
             if matched:
                 continue
 
-            # ── fallback: use the filename stem as the display name ──
-            font_map[name] = path
+            # ── fallback: use the true font name or filename stem ──
+            font_map[_get_true_font_name(path, name)] = path
 
     # ── merge system fonts ─────────────────────────────────────────
     _add_system_fonts(font_map)
