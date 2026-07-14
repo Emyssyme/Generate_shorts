@@ -97,6 +97,13 @@
   .sp-color { height:28px; padding:1px 3px; min-width:40px; }
   .sp-swatch { display:inline-flex; align-items:center; gap:3px; }
   .sp-swatch input[type=color] { width:28px; height:28px; padding:0; border-radius:5px; }
+  .sp-swatch .color-picker-btn {
+    display:inline-flex; align-items:center; justify-content:center;
+    width:22px; height:22px; margin-left:2px; padding:0;
+    border:1px solid var(--border); border-radius:5px; background:var(--surface2);
+    color:var(--text-muted); font-size:0.7rem; line-height:1;
+  }
+  .sp-swatch .color-picker-btn:hover { color:var(--accent); border-color:var(--accent); }
   .sp-swatch label { font-size:0.65rem; }
   .sp-divider { width:1px; background:var(--border); align-self:stretch; margin:0 2px; }
   .ctrl-section.subtitles-primary {
@@ -599,8 +606,8 @@ function collectConfig() {
     title_text:         document.getElementById('titleText').value,
     title_font:         document.getElementById('titleFont').value,
     title_size:         document.getElementById('titleSize').value,
-    title_color:        document.getElementById('titleColor').value,
-    title_stroke_color: document.getElementById('titleStrokeColor').value,
+    title_color:        getFastColor('titleColor'),
+    title_stroke_color: getFastColor('titleStrokeColor'),
     title_x:            document.getElementById('titleX').value,
     title_y:            document.getElementById('titleY').value,
     title_bold:         document.getElementById('titleBold').checked ? '1' : '',
@@ -608,24 +615,24 @@ function collectConfig() {
     title_letter_spacing: document.getElementById('titleLetterSpacing')?.value || '0',
     title_outline_w:    document.getElementById('titleOutlineW')?.value || '2',
     title_bg_enabled:   document.getElementById('titleBgEnabled')?.checked ? '1' : '',
-    title_bg_color:     document.getElementById('titleBgColor')?.value || '#000000',
+    title_bg_color:     getFastColor('titleBgColor') || '#000000',
     title_bg_opacity:   document.getElementById('titleBgOpacity')?.value || '60',
     sub_font:           document.getElementById('subFont').value,
     sub_bold:           document.getElementById('subBold').checked ? '1' : '',
     sub_size:           document.getElementById('subSize').value,
-    sub_color:          document.getElementById('subColor').value,
+    sub_color:          getFastColor('subColor'),
     sub_line_spacing:   document.getElementById('subLineSpacing')?.value || '0',
     sub_letter_spacing: document.getElementById('subLetterSpacing')?.value || '0',
     sub_word_spacing:   document.getElementById('subWordSpacing')?.value || '0',
     gpu_mode:           document.getElementById('gpuMode').value,
-    sub_highlight_color:       document.getElementById('subHighlightColor').value,
-    sub_highlight_text_color:  document.getElementById('subHighlightTextColor').value,
+    sub_highlight_color:       getFastColor('subHighlightColor'),
+    sub_highlight_text_color:  getFastColor('subHighlightTextColor'),
     sub_highlight_opacity:     document.getElementById('subHighlightOpacity').value,
-    sub_stroke_color:           document.getElementById('subStrokeColor').value,
+    sub_stroke_color:           getFastColor('subStrokeColor'),
     sub_outline_w:              document.getElementById('subOutlineW').value,
     sub_hl_box:                 document.getElementById('subHlBox').value,
     sub_bg_enabled:     document.getElementById('subBgEnabled').checked ? '1' : '',
-    sub_bg_color:       document.getElementById('subBgColor').value,
+    sub_bg_color:       getFastColor('subBgColor') || '#000000',
     sub_bg_opacity:     document.getElementById('subBgOpacity').value,
     sub_y:              document.getElementById('subY').value,
     overlay_x:          document.getElementById('overlayX').value,
@@ -693,6 +700,7 @@ function applyConfig(cfg) {
       el.checked = cfg[cfgKey] === '1' || cfg[cfgKey] === true;
     } else {
       el.value = cfg[cfgKey];
+      _colorCache[domId] = normalizeHexColor(cfg[cfgKey], el.value || '#ffffff');
     }
   }
   document.getElementById('titleSizeRange').value = cfg.title_size || 48;
@@ -709,8 +717,10 @@ function applyConfig(cfg) {
   document.getElementById('subBold').checked = cfg.sub_bold === '1';
   document.getElementById('titleOutlineW').value = cfg.title_outline_w || 2;
   document.getElementById('titleBgColor').value = cfg.title_bg_color || '#000000';
+  _colorCache['titleBgColor'] = normalizeHexColor(cfg.title_bg_color || '#000000', '#000000');
   document.getElementById('titleBgOpacity').value = cfg.title_bg_opacity || 60;
   document.getElementById('subBgColor').value = cfg.sub_bg_color || '#000000';
+  _colorCache['subBgColor'] = normalizeHexColor(cfg.sub_bg_color || '#000000', '#000000');
   document.getElementById('subBgOpacity').value = cfg.sub_bg_opacity || 60;
   // Speed & audio
   const speedVal = parseFloat(cfg.video_speed) || 1.0;
@@ -1184,19 +1194,76 @@ if (timeSlider) {
 }
 
 const _colorCache = {};
+function normalizeHexColor(value, fallback = '#ffffff') {
+  if (typeof value !== 'string') return fallback;
+  const trimmed = value.trim();
+  if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(trimmed)) {
+    return trimmed.toLowerCase();
+  }
+  if (/^([0-9a-f]{3}|[0-9a-f]{6})$/i.test(trimmed)) {
+    return '#' + trimmed.toLowerCase();
+  }
+  return fallback;
+}
+
+function setColorInputValue(input, value) {
+  if (!input) return;
+  const normalized = normalizeHexColor(value, input.value || '#ffffff');
+  input.value = normalized;
+  _colorCache[input.id] = normalized;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
 function getFastColor(id) {
   if (_colorCache[id] === undefined) {
     const el = document.getElementById(id);
     if (el) {
-      _colorCache[id] = el.value;
-      el.addEventListener('input', e => { _colorCache[id] = e.target.value; });
-      el.addEventListener('change', e => { _colorCache[id] = e.target.value; });
+      _colorCache[id] = normalizeHexColor(el.value, '#ffffff');
+      el.addEventListener('input', e => { _colorCache[id] = normalizeHexColor(e.target.value, '#ffffff'); });
+      el.addEventListener('change', e => { _colorCache[id] = normalizeHexColor(e.target.value, '#ffffff'); });
     } else {
       return '#ffffff';
     }
   }
   return _colorCache[id];
 }
+
+async function pickColorWithEyedropper(input) {
+  if (!input) return;
+  if (window.EyeDropper) {
+    try {
+      const eyeDropper = new window.EyeDropper();
+      const result = await eyeDropper.open();
+      setColorInputValue(input, result?.sRGBHex || input.value);
+      return;
+    } catch (err) {
+      if (err?.name !== 'AbortError') {
+        console.warn('EyeDropper failed:', err);
+      }
+      return;
+    }
+  }
+  input.focus();
+  input.click();
+}
+
+document.querySelectorAll('input[type="color"]').forEach((input) => {
+  if (!input.id) return;
+  if (input.parentElement?.querySelector('.color-picker-btn')) return;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'color-picker-btn';
+  btn.title = 'Pick color';
+  btn.innerHTML = '<i class="bi bi-eyedropper"></i>';
+  btn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    await pickColorWithEyedropper(input);
+  });
+  input.after(btn);
+  getFastColor(input.id);
+});
 
 function getConf() {
   const { w: ovW, h: ovH } = getOvWH();
