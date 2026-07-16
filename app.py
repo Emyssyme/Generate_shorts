@@ -1551,17 +1551,17 @@ def serve_font(filename):
 
 
 # High-quality encoding flags reused across all editor render commands.
-# The previous CRF 18/slow produced decent results but users complained about
-# poor quality; bump CRF to 14 and use a slower preset to maximise fidelity.
-# These settings will increase file size but give the best possible output
-# from libx264.  You can always override by editing this constant or adding a
-# UI control later.
+# CRF 14 gives excellent quality; -preset medium is the sweet spot between
+# encoding speed and compression efficiency.  Bumping from veryslow→medium
+# dramatically reduces render time while the visual quality at CRF 14 is
+# indistinguishable.  Use -preset slower/veryslow only for final exports
+# where file size matters most.
 #
 # -g 30 / -keyint_min 30 force a keyframe every ~1 second so the video
 # starts playing immediately instead of freezing for several seconds while
 # the decoder waits for the next GOP boundary.
 VIDEO_QUALITY = [
-    '-c:v', 'libx264', '-crf', '14', '-preset', 'veryslow',
+    '-c:v', 'libx264', '-crf', '14', '-preset', 'medium',
     '-g', '30', '-keyint_min', '30', '-sc_threshold', '0',
     '-pix_fmt', 'yuv420p', '-movflags', '+faststart'
 ]

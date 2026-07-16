@@ -1,2 +1,11 @@
 downloads
 __pycache__
+
+# Runtime-generated files (auto-created on first run)
+jobs.json
+cache.db
+templates.db
+fonts.conf
+
+# Temp font cache
+fonts/.fc-cache/

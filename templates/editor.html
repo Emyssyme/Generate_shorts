@@ -722,6 +722,11 @@ function applyConfig(cfg) {
   document.getElementById('subBgColor').value = cfg.sub_bg_color || '#000000';
   _colorCache['subBgColor'] = normalizeHexColor(cfg.sub_bg_color || '#000000', '#000000');
   document.getElementById('subBgOpacity').value = cfg.sub_bg_opacity || 60;
+  // Highlight colors – explicit override to match bg-color pattern
+  const hlColor = cfg.sub_highlight_color || '#ffff00';
+  const hlTextColor = cfg.sub_highlight_text_color || '#000000';
+  setColorInputValue(document.getElementById('subHighlightColor'), hlColor);
+  setColorInputValue(document.getElementById('subHighlightTextColor'), hlTextColor);
   // Speed & audio
   const speedVal = parseFloat(cfg.video_speed) || 1.0;
   document.getElementById('speedRange').value = Math.round(speedVal * 100);
@@ -1829,19 +1834,88 @@ document.getElementById('titleFont')?.addEventListener('change', function() {
 });
 
 // ═══════════════════════════════════════════════
-//  Subtitle file import feedback
+//  Subtitle file import – client-side preview & feedback
 // ═══════════════════════════════════════════════
 document.getElementById('subtitleFileInput')?.addEventListener('change', function() {
   const file = this.files[0];
-  if (file) {
-    const progressEl = document.getElementById('uploadProgress');
-    if (progressEl) {
-      progressEl.classList.remove('d-none');
-      const bar = progressEl.querySelector('.progress-bar');
-      if (bar) bar.style.width = '40%';
-    }
+  if (!file) return;
+
+  const validExts = ['.srt', '.ass'];
+  const ext = '.' + file.name.split('.').pop().toLowerCase();
+  if (!validExts.includes(ext)) {
+    flashMsg('Only .srt and .ass files are supported.', 'warning');
+    this.value = '';
+    return;
   }
+
+  const progressEl = document.getElementById('uploadProgress');
+  if (progressEl) {
+    progressEl.classList.remove('d-none');
+    progressEl.querySelector('.progress-bar').style.width = '30%';
+  }
+
+  const reader = new FileReader();
+  reader.onprogress = (e) => {
+    if (e.lengthComputable && progressEl) {
+      const pct = Math.round(30 + (e.loaded / e.total) * 40);
+      progressEl.querySelector('.progress-bar').style.width = pct + '%';
+    }
+  };
+  reader.onload = () => {
+    const content = reader.result;
+    const textarea = document.getElementById('srtTextarea');
+    if (textarea) {
+      // Normalize line endings
+      let normalized = content.replace(/\r\n?/g, '\n').trim();
+      normalized = normalized.replace(/\n{3,}/g, '\n\n');
+      textarea.value = normalized;
+
+      // Re-parse SRT entries for the live subtitle display
+      if (ext === '.srt') {
+        srtEntries = parseSRT(normalized);
+        currentSubIndex = -1;
+        const disp = document.getElementById('subtitleDisplay');
+        if (disp) disp.innerHTML = '';
+      }
+
+      flashMsg(`✓ Imported: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`, 'success');
+    }
+    if (progressEl) {
+      progressEl.querySelector('.progress-bar').style.width = '100%';
+      setTimeout(() => {
+        progressEl.classList.add('d-none');
+        progressEl.querySelector('.progress-bar').style.width = '0%';
+      }, 800);
+    }
+  };
+  reader.onerror = () => {
+    flashMsg('Failed to read file: ' + file.name, 'danger');
+    if (progressEl) {
+      progressEl.classList.add('d-none');
+      progressEl.querySelector('.progress-bar').style.width = '0%';
+    }
+  };
+  reader.readAsText(file);
 });
+
+// Flash message helper (in-page toast for subtitle import feedback)
+function flashMsg(text, type) {
+  let toast = document.getElementById('subImportToast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'subImportToast';
+    toast.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:9999;padding:10px 18px;border-radius:8px;font-size:0.85rem;transition:opacity 0.3s;pointer-events:none;max-width:400px;';
+    document.body.appendChild(toast);
+  }
+  const colors = { success: '#198754', warning: '#ffc107', danger: '#dc3545' };
+  const bg = colors[type] || '#6c757d';
+  toast.style.background = bg;
+  toast.style.color = type === 'warning' ? '#000' : '#fff';
+  toast.style.opacity = '1';
+  toast.textContent = text;
+  clearTimeout(toast._timeout);
+  toast._timeout = setTimeout(() => { toast.style.opacity = '0'; }, 3500);
+}
 
 // ═══════════════════════════════════════════════
 //  Quick Preview button
