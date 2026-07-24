@@ -86,6 +86,9 @@
                         <span id="status-${jobId}" class="badge ms-2" style="background:var(--accent);">Initializing...</span>
                         <div id="spinner-${jobId}" class="spinner-border spinner-border-sm ms-2" style="color:var(--accent);"></div>
                     </div>
+                    <button id="cancel-${jobId}" class="btn btn-sm btn-outline-danger" onclick="cancelJob('${jobId}')" title="Cancel job">
+                        <i class="bi bi-x-circle"></i> Cancel
+                    </button>
                 </div>
                 <div id="links-${jobId}" class="d-flex flex-wrap gap-2 mb-2"></div>
                 <pre id="log-${jobId}" class="log-box" style="max-height:120px;"></pre>
@@ -100,7 +103,8 @@
             const response = await fetch('/check-job/' + jobId);
             const data = await response.json();
 
-            if (['running','starting','downloading','cutting','unsilencing','skipping unsilence','cropping','skipping cropping','subtitling'].includes(data.status)) {
+            const cancellable = ['running','starting','downloading','cutting','unsilencing','skipping unsilence','cropping','skipping cropping','subtitling','skipping cutting','skipping subtitles'];
+            if (cancellable.includes(data.status)) {
                 document.getElementById('status-' + jobId).innerText = data.status;
             }
             else if (data.status === 'completed') {
@@ -109,6 +113,7 @@
                 document.getElementById('status-' + jobId).style.background = 'var(--accent2)';
                 document.getElementById('card-' + jobId).style.borderColor = 'var(--accent2)';
                 document.getElementById('spinner-' + jobId).remove();
+                document.getElementById('cancel-' + jobId).remove();
                 let links = `<a href='/editor/${jobId}' class='btn btn-sm btn-primary'>Edit</a>`;
                 links += ` <a href='/download/${data.video}' class='btn btn-sm' style='background:var(--accent2);color:#fff;'>Download</a>`;
                 if (data.srt) {
@@ -116,11 +121,19 @@
                 }
                 document.getElementById('links-' + jobId).innerHTML = links;
             }
+            else if (data.status === 'cancelled') {
+                clearInterval(interval);
+                document.getElementById('status-' + jobId).innerText = "Cancelled";
+                document.getElementById('status-' + jobId).style.background = '#6c757d';
+                document.getElementById('spinner-' + jobId).remove();
+                document.getElementById('cancel-' + jobId).remove();
+            }
             else if (data.status === 'error') {
                 clearInterval(interval);
                 document.getElementById('status-' + jobId).innerText = "Error";
                 document.getElementById('status-' + jobId).style.background = 'var(--danger)';
                 document.getElementById('spinner-' + jobId).remove();
+                document.getElementById('cancel-' + jobId).remove();
                 document.getElementById('log-' + jobId).textContent = data.msg || 'Unknown error';
             }
 
@@ -131,6 +144,23 @@
             }
         }, 2000);
     };
+
+    async function cancelJob(jobId) {
+        const btn = document.getElementById('cancel-' + jobId);
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Cancelling...';
+        }
+        try {
+            await fetch('/cancel-job/' + jobId, { method: 'POST' });
+        } catch (e) {
+            console.error('Cancel failed:', e);
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-x-circle"></i> Cancel';
+            }
+        }
+    }
 
     // Toggle API key visibility
     document.getElementById('toggleKeyVisibility').addEventListener('click', function() {

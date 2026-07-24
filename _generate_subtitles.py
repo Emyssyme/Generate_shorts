@@ -6,18 +6,26 @@ import io
 import json
 import base64
 import time
+import threading
 import requests
 from moviepy import VideoFileClip
 
-# ── optional Whisper import (only loaded on demand) ──────────────────────
-_whisper_module = None
+# ── faster-whisper (INT8 quantized, large model) ─────────────────────────
+_faster_whisper_model = None
 
-def _get_whisper():
-    global _whisper_module
-    if _whisper_module is None:
-        import whisper
-        _whisper_module = whisper
-    return _whisper_module
+def _get_faster_whisper_model():
+    """Load faster-whisper large model with int8 quantization (lazy, cached)."""
+    global _faster_whisper_model
+    if _faster_whisper_model is None:
+        from faster_whisper import WhisperModel
+        print("Loading faster-whisper large model (int8 quantization)…")
+        _faster_whisper_model = WhisperModel(
+            "large",
+            device="cpu",
+            compute_type="int8",
+        )
+        print("faster-whisper model loaded.")
+    return _faster_whisper_model
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  Gemini API helpers (generativelanguage.googleapis.com)
@@ -324,22 +332,70 @@ def _gemini_result_to_segments(data):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  Whisper helpers (local model, used as fallback)
+#  faster-whisper helpers (local model, INT8 quantized, 5-minute timeout)
 # ═══════════════════════════════════════════════════════════════════════════
 
+_WHISPER_TIMEOUT = 300  # 5 minutes
+
 def _transcribe_whisper(audio_path, model_name="large"):
-    """Transcribe using local Whisper model."""
-    wh = _get_whisper()
-    print(f"Loading Whisper model '{model_name}'…")
-    model = wh.load_model(model_name)
-    print("Transcribing with Whisper…")
-    result = model.transcribe(
-        audio_path,
-        language="ro",
-        task="transcribe",
-        word_timestamps=True,
-    )
-    return result.get("segments", [])
+    """Transcribe using local faster-whisper model (INT8 quantized).
+
+    Runs the transcription in a background thread with a 5-minute timeout.
+    Returns a list of segment dicts compatible with the rest of the pipeline.
+    """
+    model = _get_faster_whisper_model()
+
+    print(f"Transcribing with faster-whisper (int8, timeout={_WHISPER_TIMEOUT}s)…")
+
+    result_container = []
+    exception_container = []
+
+    def _run():
+        try:
+            segments_raw, info = model.transcribe(
+                audio_path,
+                language="ro",
+                task="transcribe",
+                word_timestamps=True,
+                vad_filter=True,
+            )
+            # Convert faster-whisper segments to dict format
+            segments_list = []
+            for seg in segments_raw:
+                words_list = []
+                if seg.words:
+                    for w in seg.words:
+                        words_list.append({
+                            "word": w.word.strip(),
+                            "start": w.start,
+                            "end": w.end,
+                        })
+                segments_list.append({
+                    "start": seg.start,
+                    "end": seg.end,
+                    "text": seg.text.strip(),
+                    "words": words_list,
+                })
+            result_container.append(segments_list)
+        except Exception as e:
+            exception_container.append(e)
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+    thread.join(timeout=_WHISPER_TIMEOUT)
+
+    if thread.is_alive():
+        raise TimeoutError(
+            f"faster-whisper transcription timed out after {_WHISPER_TIMEOUT}s "
+            f"(5 minutes)"
+        )
+
+    if exception_container:
+        raise exception_container[0]
+
+    segments = result_container[0]
+    print(f"faster-whisper returned {len(segments)} segments")
+    return segments
 
 # 1. Force standard I/O streams to use UTF-8 cross-platform safely
 if sys.platform.startswith('win'):
@@ -721,15 +777,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     print(f"Subtitle method: {args.method}")
-
-    if args.method in ("whisper", "auto"):
-        # Only load Whisper if it might be needed
-        print("Loading Whisper model… (this may take a while)")
-        wh = _get_whisper()
-        model = wh.load_model(args.model)
-        print("Whisper model loaded.")
-    else:
-        model = None
 
     if os.path.isfile(args.input):
         process_video(args.input, args.model, args.output, args.max_length, method=args.method)

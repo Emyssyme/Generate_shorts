@@ -670,6 +670,15 @@ def save_jobs():
 active_jobs = load_jobs()
 jobs_lock = threading.Lock()  # Thread-safe access to active_jobs
 
+# ── Cancel support ────────────────────────────────────────────────────
+# Each job can be cancelled via the /cancel-job/<job_id> endpoint.
+# ``job_cancel_events`` stores a threading.Event per job that the
+# background_pipeline thread checks between major steps.
+# ``_active_subprocesses`` maps job_id → subprocess.Popen so we can
+# kill long-running subprocesses (e.g. subtitle generation) on cancel.
+job_cancel_events: dict[str, threading.Event] = {}
+_active_subprocesses: dict[str, subprocess.Popen] = {}
+
 # ---------------------------------------------------------------------------
 # Editor: colour helpers
 # ---------------------------------------------------------------------------
@@ -1108,12 +1117,13 @@ def run_crop(input_video, output_dir, overlay=None, job_id=None):
 def run_subtitles(input_video, output_dir, model="large", max_length=22, job_id=None, method="auto", gemini_user_key=""):
     """Generate subtitles for a single video.
 
-    If ``job_id`` is passed, stream the helper script's output into the job log.
+    If ``job_id`` is passed, stream the helper script's output into the job log
+    and register the subprocess so it can be killed via the cancel mechanism.
 
     ``method`` can be:
       - ``"google"``  – use Gemini API (requires GOOGLE_API_KEY_1 / GOOGLE_API_KEY_2, or hardcoded keys)
-      - ``"whisper"`` – use local Whisper model
-      - ``"auto"``    – try Gemini first, fall back to Whisper (default)
+      - ``"whisper"`` – use local faster-whisper model (int8 quantized)
+      - ``"auto"``    – try Gemini first, fall back to faster-whisper (default)
     ``gemini_user_key`` – optional user-provided API key from the UI (highest priority)
 
     Returns a tuple ``(srt_path, ass_path)`` — the ASS file contains word-level
@@ -1145,12 +1155,24 @@ def run_subtitles(input_video, output_dir, model="large", max_length=22, job_id=
             env=sub_env
         )
 
-        for line in proc.stdout:
-            update_job(job_id, log=line.rstrip())
+        # Register subprocess so it can be killed on cancel
+        _active_subprocesses[job_id] = proc
 
-        proc.wait(timeout=600)  # 10-minute timeout for subtitle generation
-        if proc.returncode != 0:
-            raise RuntimeError(f"subtitle generation failed (see logs); rc={proc.returncode}")
+        try:
+            for line in proc.stdout:
+                update_job(job_id, log=line.rstrip())
+                # Check for cancellation while reading output
+                if _is_cancelled(job_id):
+                    update_job(job_id, log="subtitle generation cancelled by user")
+                    proc.kill()
+                    proc.wait(timeout=10)
+                    raise RuntimeError("subtitle generation cancelled by user")
+
+            proc.wait(timeout=300)  # 5-minute timeout for subtitle generation
+            if proc.returncode != 0:
+                raise RuntimeError(f"subtitle generation failed (see logs); rc={proc.returncode}")
+        finally:
+            _active_subprocesses.pop(job_id, None)
     else:
         # 3. Added encoding='utf-8' and passed the sub_env here as well
         result = subprocess.run(
@@ -1159,7 +1181,7 @@ def run_subtitles(input_video, output_dir, model="large", max_length=22, job_id=
             text=True,
             encoding='utf-8',
             env=sub_env,
-            timeout=600  # 10-minute timeout for subtitle generation
+            timeout=300  # 5-minute timeout for subtitle generation
         )
         if result.returncode != 0:
             raise RuntimeError(f"subtitle generation failed: {result.stderr}")
@@ -1254,6 +1276,13 @@ def _time_to_seconds(t_val):
             return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
     return float(t_str)
 
+def _is_cancelled(job_id):
+    """Check if the job has been cancelled.  Should be called periodically
+    during long-running pipeline operations."""
+    evt = job_cancel_events.get(job_id)
+    return evt is not None and evt.is_set()
+
+
 def background_pipeline(job_id, url=None, upload_path=None, start_time="0", end_time=None, skip_unsilence=False, skip_cropping=False, skip_subtitles=False, subtitle_method="auto", gemini_user_key=""):
     """Background thread that cuts/downloads then optionally unsilences, crops, subtitles.
 
@@ -1264,6 +1293,9 @@ def background_pipeline(job_id, url=None, upload_path=None, start_time="0", end_
     ``gemini_user_key``: optional user-provided API key from the UI (highest priority).
 
     These flags are recorded in the cache so repeated calls behave identically.
+
+    Checks ``job_cancel_events[job_id]`` between major steps and aborts gracefully
+    if the user has requested cancellation.
     """
     update_job(job_id, status="starting", log="job created")
     try:
@@ -1324,6 +1356,11 @@ def background_pipeline(job_id, url=None, upload_path=None, start_time="0", end_
                 ]
                 subprocess.run(ff, check=True, timeout=600, env=ffmpeg_env())
 
+        # ── cancel check after download/cut ──────────────────────────
+        if _is_cancelled(job_id):
+            update_job(job_id, status="cancelled", log="cancelled by user after download/cut")
+            return
+
         if skip_unsilence:
             update_job(job_id, status="skipping unsilence", log="user requested no audio cleaning")
             unsilenced = cut_path
@@ -1336,12 +1373,22 @@ def background_pipeline(job_id, url=None, upload_path=None, start_time="0", end_
                 update_job(job_id, log="warning: unsilence output missing or too small, falling back to original")
                 unsilenced = cut_path
 
+        # ── cancel check after unsilence ─────────────────────────────
+        if _is_cancelled(job_id):
+            update_job(job_id, status="cancelled", log="cancelled by user after unsilence")
+            return
+
         if skip_cropping:
             update_job(job_id, status="skipping cropping", log="user requested no face cropping")
             cropped = unsilenced
         else:
             update_job(job_id, status="cropping", log="running crop script")
             cropped = run_crop(unsilenced, DOWNLOADS_DIR, job_id=job_id)
+
+        # ── cancel check after cropping ──────────────────────────────
+        if _is_cancelled(job_id):
+            update_job(job_id, status="cancelled", log="cancelled by user after cropping")
+            return
 
         if skip_subtitles:
             update_job(job_id, status="skipping subtitles", log="user requested no automatic subtitles")
@@ -1366,9 +1413,17 @@ def background_pipeline(job_id, url=None, upload_path=None, start_time="0", end_
                         os.path.basename(cropped), os.path.basename(srtfile) if srtfile else None,
                         skip_unsilence=skip_unsilence, skip_cropping=skip_cropping, skip_subtitles=skip_subtitles)
     except Exception as e:
-        error_trace = traceback.format_exc()
-        update_job(job_id, status="error", msg=str(e), trace=error_trace)
-        print(f"[job {job_id}] Exception: {error_trace}")
+        # If the job was already cancelled, don't overwrite with an error
+        if _is_cancelled(job_id):
+            update_job(job_id, status="cancelled", log=f"cancelled: {e}")
+        else:
+            error_trace = traceback.format_exc()
+            update_job(job_id, status="error", msg=str(e), trace=error_trace)
+            print(f"[job {job_id}] Exception: {error_trace}")
+    finally:
+        # Clean up cancel event and subprocess reference
+        job_cancel_events.pop(job_id, None)
+        _active_subprocesses.pop(job_id, None)
 
 
 @app.route('/video-cut', methods=['GET', 'POST'])
@@ -1423,6 +1478,9 @@ def video_cut():
                     store_cache(url, start_time, end_time, None, None, skip_unsilence=skip_unsilence, skip_cropping=skip_cropping, skip_subtitles=skip_subtitles)
 
         # start background work
+        # Create a cancel event for this job so the user can stop it mid-flight
+        job_cancel_events[job_id] = threading.Event()
+
         thread = threading.Thread(target=background_pipeline,
                                   kwargs={
                                       'job_id': job_id,
@@ -1446,8 +1504,46 @@ def video_cut():
 @login_required
 def check_job(job_id):
     with jobs_lock:
-        info = active_jobs.get(job_id, {'status': 'not_found'})
+        info = dict(active_jobs.get(job_id, {'status': 'not_found'}))
+    # Let the frontend know whether a cancel button should be shown
+    non_terminal = {'running', 'starting', 'downloading', 'cutting',
+                    'unsilencing', 'skipping unsilence', 'cropping',
+                    'skipping cropping', 'subtitling', 'skipping cutting',
+                    'skipping subtitles'}
+    info['cancellable'] = info.get('status', '') in non_terminal
     return json.dumps(info)
+
+
+@app.route('/cancel-job/<job_id>', methods=['POST'])
+@login_required
+def cancel_job(job_id):
+    """Cancel a running job.
+
+    Sets a threading.Event that the background_pipeline thread checks
+    between major steps, and kills any active subprocess (e.g. Whisper
+    transcription) associated with the job.
+    """
+    # signal the background thread to stop
+    cancel_evt = job_cancel_events.get(job_id)
+    if cancel_evt:
+        cancel_evt.set()
+
+    # kill any running subprocess (e.g. subtitle generation)
+    proc = _active_subprocesses.pop(job_id, None)
+    if proc and proc.poll() is None:
+        try:
+            proc.kill()
+            proc.wait(timeout=5)
+        except Exception:
+            pass
+
+    with jobs_lock:
+        if job_id in active_jobs:
+            active_jobs[job_id]['status'] = 'cancelled'
+            active_jobs[job_id].setdefault('log', []).append('job cancelled by user')
+            save_jobs()
+
+    return {'ok': True, 'job_id': job_id}
 
 
 @app.route('/api/detect-faces/<job_id>')
