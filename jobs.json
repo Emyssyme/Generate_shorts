@@ -40755,5 +40755,14 @@
     "video": "upload_J69259_Dumnezeu_te_iubește_ca_o_mamă_1-18-50_la_1-19-29_S9.0_FINAL.mp4",
     "srt": "upload_J69259_Dumnezeu_te_iubește_ca_o_mamă_1-18-50_la_1-19-29_S9.0_FINAL.srt",
     "ass": "upload_J69259_Dumnezeu_te_iubește_ca_o_mamă_1-18-50_la_1-19-29_S9.0_FINAL.ass"
+  },
+  "J54485": {
+    "status": "error",
+    "log": [
+      "job created",
+      "yt-dlp https://youtube.com/live/MMj-upTFlik (00:02:50-00:03:00)"
+    ],
+    "msg": "Command '['yt-dlp', '--download-sections', '*00:02:50-00:03:00', '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best', '--force-keyframes-at-cuts', '--no-check-certificate', '-o', 'C:\\\\Users\\\\Emil\\\\Documents\\\\Coding\\\\Generate_shorts\\\\downloads\\\\job_J54485_cut.mp4', 'https://youtube.com/live/MMj-upTFlik']' timed out after 1800.0 seconds",
+    "trace": "Traceback (most recent call last):\n  File \"C:\\Users\\Emil\\Documents\\Coding\\Generate_shorts\\app.py\", line 1312, in background_pipeline\n    subprocess.run(cmd, check=True, timeout=1800)  # 30-minute timeout for YouTube download\n    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\ProgramData\\anaconda3\\Lib\\subprocess.py\", line 550, in run\n    stdout, stderr = process.communicate(input, timeout=timeout)\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\ProgramData\\anaconda3\\Lib\\subprocess.py\", line 1228, in communicate\n    sts = self.wait(timeout=self._remaining_time(endtime))\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\ProgramData\\anaconda3\\Lib\\subprocess.py\", line 1264, in wait\n    return self._wait(timeout=timeout)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\ProgramData\\anaconda3\\Lib\\subprocess.py\", line 1593, in _wait\n    raise TimeoutExpired(self.args, timeout)\nsubprocess.TimeoutExpired: Command '['yt-dlp', '--download-sections', '*00:02:50-00:03:00', '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best', '--force-keyframes-at-cuts', '--no-check-certificate', '-o', 'C:\\\\Users\\\\Emil\\\\Documents\\\\Coding\\\\Generate_shorts\\\\downloads\\\\job_J54485_cut.mp4', 'https://youtube.com/live/MMj-upTFlik']' timed out after 1800.0 seconds\n"
   }
 }
