@@ -26,14 +26,35 @@ def load_jobs():
             print(f"warning: failed to load jobs file: {e}")
     return {}
 
+def _fingerprint(job):
+    return json.dumps({k: v for k, v in job.items() if k != 'updated_at'},
+                      sort_keys=True, default=str)
+
+
 def save_jobs():
+    """Persist jobs to disk, stamping ``updated_at`` on every job that changed.
+
+    Change detection compares a fingerprint of each job with the last saved
+    one, so edits made directly on the job dict (e.g. in the editor) count too.
+    """
+    now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     try:
+        for job_id in list(_job_fingerprints):
+            if job_id not in active_jobs:
+                del _job_fingerprints[job_id]
+        for job_id, job in list(active_jobs.items()):
+            fp = _fingerprint(job)
+            if _job_fingerprints.get(job_id) != fp:
+                job['updated_at'] = now
+                _job_fingerprints[job_id] = fp
         with open(JOBS_FILE, 'w', encoding='utf-8') as f:
             json.dump(active_jobs, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"warning: failed to save jobs file: {e}")
 
 active_jobs = load_jobs()
+# fingerprints of the jobs as loaded: untouched legacy jobs keep their dates
+_job_fingerprints = {jid: _fingerprint(j) for jid, j in active_jobs.items()}
 jobs_lock = threading.Lock()  # Thread-safe access to active_jobs
 
 # ── Cancel support ────────────────────────────────────────────────────
@@ -135,3 +156,84 @@ def remove_job(job_id):
                 pass
     save_jobs()
     return True
+
+
+# ---------------------------------------------------------------------------
+# Dates and grouping for the Projects tab
+# ---------------------------------------------------------------------------
+
+_DATE_FMT = '%Y-%m-%d %H:%M:%S'
+_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
+           'August', 'September', 'October', 'November', 'December']
+_WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+
+
+def _parse_ts(value):
+    try:
+        return datetime.datetime.strptime(value, _DATE_FMT)
+    except (TypeError, ValueError):
+        return None
+
+
+def _file_mtime(job):
+    for key in ('video', 'srt', 'ass'):
+        if job.get(key):
+            path = os.path.join(DOWNLOADS_DIR, job[key])
+            if os.path.exists(path):
+                return datetime.datetime.fromtimestamp(os.path.getmtime(path))
+    return None
+
+
+def project_dates(job_id, job):
+    """Return ``(created, updated)`` datetimes (either may be None).
+
+    Older projects have no stored dates, so fall back to the timestamp in the
+    job id (``J<epoch>``) and then to the modification time of the video file.
+    """
+    mtime = _file_mtime(job)
+    created = _parse_ts(job.get('created_at'))
+    if created is None:
+        m = re.fullmatch(r'J(\d{9,10})(?:-\w+)?', job_id or '')
+        if m:
+            created = datetime.datetime.fromtimestamp(int(m.group(1)))
+    created = created or mtime
+    updated = _parse_ts(job.get('updated_at')) or mtime or created
+    if created and updated and updated < created:
+        updated = created
+    return created, updated
+
+
+def date_label(day, today=None):
+    if day is None:
+        return 'Unknown date'
+    today = today or datetime.date.today()
+    text = f"{day.day} {_MONTHS[day.month - 1]} {day.year}"
+    if day == today:
+        return f"Today · {text}"
+    if day == today - datetime.timedelta(days=1):
+        return f"Yesterday · {text}"
+    return f"{_WEEKDAYS[day.weekday()]}, {text}"
+
+
+def group_projects(sort='created'):
+    """Projects grouped by day, newest first.
+
+    ``sort`` is ``'created'`` or ``'updated'`` and decides both the order and
+    which date the groups are based on.
+    """
+    with jobs_lock:
+        items = [(jid, dict(job)) for jid, job in active_jobs.items()]
+    rows = []
+    for jid, job in items:
+        created, updated = project_dates(jid, job)
+        rows.append({'id': jid, 'job': job, 'name': job.get('name') or jid,
+                     'created': created, 'updated': updated,
+                     'key': updated if sort == 'updated' else created})
+    rows.sort(key=lambda r: r['key'] or datetime.datetime.min, reverse=True)
+    groups = []
+    for r in rows:
+        day = r['key'].date() if r['key'] else None
+        if not groups or groups[-1]['day'] != day:
+            groups.append({'day': day, 'label': date_label(day), 'items': []})
+        groups[-1]['items'].append(r)
+    return groups

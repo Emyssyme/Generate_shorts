@@ -1,69 +1,104 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
+{% set th = "color:var(--text-muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;" %}
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
   <div>
     <h4 class="fw-bold mb-1"><i class="bi bi-folder2"></i> Projects</h4>
-    <small class="text-muted">{{ jobs|length }} project(s)</small>
+    <small class="text-muted">{{ total }} project(s)</small>
   </div>
-  <a href="{{ url_for('video_cut') }}" class="btn btn-primary">
-    <i class="bi bi-plus-circle"></i> New Clip
-  </a>
+  <div class="d-flex align-items-center gap-2">
+    <div class="btn-group btn-sm" role="group" aria-label="Group by">
+      <a href="{{ url_for('list_projects', sort='created') }}"
+         class="btn btn-sm {{ 'btn-primary' if sort == 'created' else 'btn-outline-secondary' }}">
+        <i class="bi bi-calendar-plus"></i> By created
+      </a>
+      <a href="{{ url_for('list_projects', sort='updated') }}"
+         class="btn btn-sm {{ 'btn-primary' if sort == 'updated' else 'btn-outline-secondary' }}">
+        <i class="bi bi-clock-history"></i> By last modified
+      </a>
+    </div>
+    <a href="{{ url_for('video_cut') }}" class="btn btn-primary">
+      <i class="bi bi-plus-circle"></i> New Clip
+    </a>
+  </div>
 </div>
 
-{% if jobs %}
-<div class="card">
-  <div class="table-responsive">
-    <table class="table table-borderless mb-0">
-      <thead>
-        <tr style="border-bottom:1px solid var(--border);">
-          <th style="color:var(--text-muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;">ID</th>
-          <th style="color:var(--text-muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;">Status</th>
-          <th style="color:var(--text-muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;">Video</th>
-          <th style="color:var(--text-muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;">SRT</th>
-          <th style="color:var(--text-muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;">Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for jid, job in jobs.items() %}
-        <tr style="border-bottom:1px solid var(--border);">
-          <td><code style="font-size:.85rem;">{{ jid }}</code></td>
-          <td>
-            {% if job.status == 'completed' %}
-              <span class="badge" style="background:var(--accent2);">Done</span>
-            {% elif job.status == 'error' %}
-              <span class="badge" style="background:var(--danger);">Error</span>
-            {% else %}
-              <span class="badge" style="background:var(--accent);">{{ job.status }}</span>
-            {% endif %}
-          </td>
-          <td>
-            {% if job.video %}
-              <a href="/download/{{ job.video }}" class="small" target="_blank">{{ job.video }}</a>
-            {% else %}<span class="text-muted">—</span>{% endif %}
-          </td>
-          <td>
-            {% if job.srt %}
-              <a href="/download/{{ job.srt }}" class="small" target="_blank">{{ job.srt }}</a>
-            {% else %}<span class="text-muted">—</span>{% endif %}
-          </td>
-          <td>
-            <div class="d-flex gap-1">
-              <a href="{{ url_for('editor', job_id=jid) }}" class="btn btn-sm btn-outline-secondary">
-                <i class="bi bi-pencil"></i>
-              </a>
-              <form method="post" action="{{ url_for('delete_project', job_id=jid) }}" style="display:inline;">
-                <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Delete {{ jid }}?');">
-                  <i class="bi bi-trash"></i>
-                </button>
-              </form>
-            </div>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+{% if groups %}
+  {% for g in groups %}
+  <div class="section-title mt-4">
+    <i class="bi bi-calendar3"></i> {{ g.label }}
+    <span class="ms-1" style="text-transform:none;letter-spacing:0;">· {{ g['items']|length }}</span>
   </div>
-</div>
+  <div class="card">
+    <div class="table-responsive">
+      <table class="table table-borderless mb-0 align-middle">
+        <thead>
+          <tr style="border-bottom:1px solid var(--border);">
+            <th style="{{ th }}">Project</th>
+            <th style="{{ th }}">Status</th>
+            <th style="{{ th }}">Created</th>
+            <th style="{{ th }}">Last modified</th>
+            <th style="{{ th }}">Video</th>
+            <th style="{{ th }}">SRT</th>
+            <th style="{{ th }}">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in g['items'] %}
+          {% set job = r.job %}
+          <tr style="border-bottom:1px solid var(--border);">
+            <td style="max-width:320px;word-break:break-word;">
+              <div class="fw-semibold">{{ r.name }}</div>
+              {% if r.name != r.id %}<code style="font-size:.75rem;">{{ r.id }}</code>{% endif %}
+            </td>
+            <td>
+              {% if job.status == 'completed' %}
+                <span class="badge" style="background:var(--accent2);">Done</span>
+              {% elif job.status == 'error' %}
+                <span class="badge" style="background:var(--danger);">Error</span>
+              {% elif job.status == 'cancelled' %}
+                <span class="badge bg-secondary">Cancelled</span>
+              {% else %}
+                <span class="badge" style="background:var(--accent);">{{ job.status }}</span>
+              {% endif %}
+            </td>
+            <td class="text-nowrap small">
+              {% if r.created %}{{ r.created.strftime('%d.%m.%Y') }} <span class="text-muted">{{ r.created.strftime('%H:%M') }}</span>
+              {% else %}<span class="text-muted">—</span>{% endif %}
+            </td>
+            <td class="text-nowrap small">
+              {% if r.updated %}{{ r.updated.strftime('%d.%m.%Y') }} <span class="text-muted">{{ r.updated.strftime('%H:%M') }}</span>
+              {% else %}<span class="text-muted">—</span>{% endif %}
+            </td>
+            <td>
+              {% if job.video %}
+                <a href="/download/{{ job.video }}" class="small" target="_blank">Download</a>
+              {% else %}<span class="text-muted">—</span>{% endif %}
+            </td>
+            <td>
+              {% if job.srt %}
+                <a href="/download/{{ job.srt }}" class="small" target="_blank">SRT</a>
+              {% else %}<span class="text-muted">—</span>{% endif %}
+            </td>
+            <td>
+              <div class="d-flex gap-1">
+                <a href="{{ url_for('editor', job_id=r.id) }}" class="btn btn-sm btn-outline-secondary">
+                  <i class="bi bi-pencil"></i>
+                </a>
+                <form method="post" action="{{ url_for('delete_project', job_id=r.id) }}" style="display:inline;">
+                  <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Delete {{ r.name }}?');">
+                    <i class="bi bi-trash"></i>
+                  </button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endfor %}
 {% else %}
 <div class="empty-state">
   <i class="bi bi-inbox"></i>
