@@ -3,6 +3,7 @@
 Authentication: send the token from the ``API_TOKEN`` environment variable as
 ``Authorization: Bearer <token>`` or ``X-API-Key: <token>``.
 """
+import datetime
 import hmac
 import os
 from functools import wraps
@@ -10,7 +11,8 @@ from functools import wraps
 from flask import Blueprint, jsonify, request, send_from_directory, url_for
 
 from config import API_TOKEN, DOWNLOADS_DIR
-from jobs import NON_TERMINAL_STATUSES, active_jobs, jobs_lock, remove_job, request_cancel
+from jobs import (NON_TERMINAL_STATUSES, active_jobs, jobs_lock, project_dates,
+                  remove_job, request_cancel)
 from pipeline import submit_job
 
 bp = Blueprint('api_v1', __name__, url_prefix='/api/v1')
@@ -57,10 +59,13 @@ def _links(project_id, job):
 
 
 def _summary(project_id, job, log_lines=0):
+    created, updated = project_dates(project_id, job)
+    fmt = '%Y-%m-%d %H:%M:%S'
     data = {
         'id': project_id,
         'name': job.get('name'),
-        'created_at': job.get('created_at'),
+        'created_at': created.strftime(fmt) if created else None,
+        'updated_at': updated.strftime(fmt) if updated else None,
         'status': job.get('status'),
         'cancellable': job.get('status', '') in NON_TERMINAL_STATUSES,
         'error': job.get('msg') if job.get('status') == 'error' else None,
@@ -139,7 +144,8 @@ def list_projects():
         return _error('limit must be an integer', 400)
     with jobs_lock:
         items = [(pid, dict(job)) for pid, job in active_jobs.items()]
-    items.sort(key=lambda kv: kv[1].get('created_at') or '', reverse=True)
+    items.sort(key=lambda kv: (project_dates(kv[0], kv[1])[0] or datetime.datetime.min),
+               reverse=True)
     if status:
         items = [kv for kv in items if kv[1].get('status') == status]
     return jsonify({'projects': [_summary(pid, job) for pid, job in items[:limit]],

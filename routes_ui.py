@@ -14,7 +14,7 @@ from db import delete_template, get_all_templates, get_template, save_template
 from ffmpeg_utils import is_h264, transcode_to_h264
 from font_manager import FONT_LIBRARY, download_font_by_name, refresh_font_map
 from gpu import select_auto_gpu_encoder
-from jobs import NON_TERMINAL_STATUSES, active_jobs, jobs_lock, remove_job, request_cancel
+from jobs import group_projects, NON_TERMINAL_STATUSES, active_jobs, jobs_lock, remove_job, request_cancel
 from pipeline import detect_faces_in_video, submit_job
 
 
@@ -173,7 +173,11 @@ def list_projects():
     # show simple table of all jobs with edit/delete links
     with jobs_lock:
         projects = dict(active_jobs)  # Thread-safe snapshot
-    return render_template('projects.html', jobs=projects)
+    sort = request.args.get('sort', 'created')
+    if sort not in ('created', 'updated'):
+        sort = 'created'
+    return render_template('projects.html', groups=group_projects(sort),
+                           sort=sort, total=len(projects), jobs=projects)
 
 
 @login_required
